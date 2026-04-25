@@ -1,0 +1,23 @@
+{
+  "name": "agent",
+  "version": "0.0.1",
+  "private": true,
+  "description": "TypeScript orchestrator for the rwa-treasury-agent - simulates and executes compliant transfers.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.119",
+    "dotenv": "^17.4.2",
+    "viem": "^2.48.4"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
