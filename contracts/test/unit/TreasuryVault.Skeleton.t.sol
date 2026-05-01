@@ -23,6 +23,7 @@ contract TreasuryVaultSkeletonTest is Test {
 
     function setUp() public {
         vault = new TreasuryVault();
+        vault.addCounterparty(alice, type(uint256).max);
     }
 
     function test_constructor_grantsAllRolesToDeployer() external view {
