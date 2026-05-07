@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
+import { IERC3643 } from "./interfaces/IERC3643.sol";
 
 /// @title TreasuryVault
 /// @notice Treasury vault that holds ERC-3643 tokens and enforces holder-side
@@ -35,6 +36,9 @@ contract TreasuryVault is AccessControl {
 
     bool private _paused;
     mapping(address => Counterparty) private _counterparties;
+    mapping(address => mapping(uint256 => uint256)) private _dailySpent;
+    mapping(address => uint256) private _exposureCaps;
+    mapping(address => mapping(uint256 => uint256)) private _assetDailySpent;
 
     event Paused(address indexed by);
     event Unpaused(address indexed by);
@@ -44,6 +48,7 @@ contract TreasuryVault is AccessControl {
     event TransferRejected(
         address indexed token, address indexed to, uint256 amount, RejectReason reason, bytes detail
     );
+    event ExposureCapSet(address indexed asset, uint256 cap);
 
     error VaultPaused();
     error InvalidCounterparty();
@@ -88,17 +93,47 @@ contract TreasuryVault is AccessControl {
     }
 
     /// @notice Execute a token transfer through the vault's policy gate.
-    /// @dev Pause + whitelist enforced. Exposure cap + daily cap + ERC-3643
-    ///      transfer wiring come in later phases.
+    /// @dev Check order: pause → whitelist → daily cap → exposure cap → token.transfer().
+    ///      Rejected transfers emit TransferRejected (no revert) so the agent
+    ///      can read the reason off-chain.
     /// @param token The ERC-3643 token to transfer.
     /// @param to The recipient counterparty.
     /// @param amount The token amount.
     function executeTransfer(address token, address to, uint256 amount) external onlyRole(AGENT_ROLE) whenNotPaused {
+        // Gate 1: Counterparty whitelist
         if (!_counterparties[to].active) {
             emit TransferRejected(token, to, amount, RejectReason.NotWhitelisted, "");
             return;
         }
-        emit TransferExecuted(token, to, amount, msg.sender);
+
+        // Gate 2: Daily cap per counterparty
+        uint256 dayBucket = block.timestamp / 1 days;
+        uint256 spent = _dailySpent[to][dayBucket];
+        if (spent + amount > _counterparties[to].dailyCap) {
+            emit TransferRejected(token, to, amount, RejectReason.DailyCapExceeded, "");
+            return;
+        }
+
+        // Gate 3: Per-asset exposure cap (0 = no limit)
+        uint256 assetCap = _exposureCaps[token];
+        uint256 assetSpent = _assetDailySpent[token][dayBucket];
+        if (assetCap > 0 && assetSpent + amount > assetCap) {
+            emit TransferRejected(token, to, amount, RejectReason.ExposureCapExceeded, "");
+            return;
+        }
+
+        // Gate 4: ERC-3643 compliance (identity + token-level rules)
+        try IERC3643(token).transfer(to, amount) returns (bool success) {
+            if (!success) {
+                emit TransferRejected(token, to, amount, RejectReason.ERC3643Compliance, "");
+                return;
+            }
+            _dailySpent[to][dayBucket] = spent + amount;
+            _assetDailySpent[token][dayBucket] = assetSpent + amount;
+            emit TransferExecuted(token, to, amount, msg.sender);
+        } catch (bytes memory reason) {
+            emit TransferRejected(token, to, amount, RejectReason.ERC3643Compliance, reason);
+        }
     }
 
     /// @notice Add a counterparty to the whitelist with a per-day transfer cap.
@@ -128,5 +163,21 @@ contract TreasuryVault is AccessControl {
     /// @return The full Counterparty struct (zero-valued if never added).
     function getCounterparty(address cp) external view returns (Counterparty memory) {
         return _counterparties[cp];
+    }
+
+    /// @notice Set the daily outflow limit for a specific asset.
+    /// @dev 0 = no limit. Only TREASURER_ROLE can call. Emits ExposureCapSet.
+    /// @param asset The token address to cap.
+    /// @param cap The maximum total amount transferable per day (0 = unlimited).
+    function setExposureCap(address asset, uint256 cap) external onlyRole(TREASURER_ROLE) {
+        _exposureCaps[asset] = cap;
+        emit ExposureCapSet(asset, cap);
+    }
+
+    /// @notice Read the exposure cap for an asset.
+    /// @param asset The token address to query.
+    /// @return The daily outflow cap (0 = no limit).
+    function getExposureCap(address asset) external view returns (uint256) {
+        return _exposureCaps[asset];
     }
 }

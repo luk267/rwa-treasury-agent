@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import { Test } from "forge-std/Test.sol";
 import { IAccessControl } from "@openzeppelin/contracts/access/IAccessControl.sol";
 import { TreasuryVault } from "../../src/TreasuryVault.sol";
+import { MockERC3643 } from "../mocks/MockERC3643.sol";
 
 contract TreasuryVaultWhitelistTest is Test {
     bytes32 public constant TREASURER_ROLE = keccak256("TREASURER_ROLE");
@@ -13,11 +14,10 @@ contract TreasuryVaultWhitelistTest is Test {
     address unknown = makeAddr("unknown");
 
     uint256 constant DAILY_CAP = 1000;
-    address constant TOKEN = address(0xbeef);
 
     TreasuryVault vault;
+    MockERC3643 token;
 
-    // Mirror events from TreasuryVault for vm.expectEmit
     event CounterpartyAdded(address indexed counterparty, uint256 dailyCap);
     event CounterpartyDeactivated(address indexed counterparty);
     event TransferRejected(
@@ -26,7 +26,9 @@ contract TreasuryVaultWhitelistTest is Test {
 
     function setUp() public {
         vault = new TreasuryVault();
-        vault.addCounterparty(alice, type(uint256).max); // alice as CP for executeTransfer happy-path
+        token = new MockERC3643();
+        token.transfer(address(vault), 100_000e18);
+        vault.addCounterparty(alice, type(uint256).max);
     }
 
     function test_addCounterparty_byTreasurer_emitsAndStoresActive() external {
@@ -81,16 +83,15 @@ contract TreasuryVaultWhitelistTest is Test {
     ///      Agent reads the TransferRejected event off-chain to know what happened.
     function test_executeTransfer_toUnknownCounterparty_emitsRejected_noRevert() external {
         vm.expectEmit();
-        emit TransferRejected(TOKEN, unknown, 100, TreasuryVault.RejectReason.NotWhitelisted, "");
-        vault.executeTransfer(TOKEN, unknown, 100);
-        // If we reach this line, the no-revert design is correct.
+        emit TransferRejected(address(token), unknown, 100, TreasuryVault.RejectReason.NotWhitelisted, "");
+        vault.executeTransfer(address(token), unknown, 100);
     }
 
     function test_executeTransfer_toDeactivatedCounterparty_emitsRejected() external {
         vault.addCounterparty(cp1, DAILY_CAP);
         vault.deactivateCounterparty(cp1);
         vm.expectEmit();
-        emit TransferRejected(TOKEN, cp1, 100, TreasuryVault.RejectReason.NotWhitelisted, "");
-        vault.executeTransfer(TOKEN, cp1, 100);
+        emit TransferRejected(address(token), cp1, 100, TreasuryVault.RejectReason.NotWhitelisted, "");
+        vault.executeTransfer(address(token), cp1, 100);
     }
 }

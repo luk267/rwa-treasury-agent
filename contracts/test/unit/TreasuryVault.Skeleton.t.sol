@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import { Test } from "forge-std/Test.sol";
 import { IAccessControl } from "@openzeppelin/contracts/access/IAccessControl.sol";
 import { TreasuryVault } from "../../src/TreasuryVault.sol";
+import { MockERC3643 } from "../mocks/MockERC3643.sol";
 
 contract TreasuryVaultSkeletonTest is Test {
     bytes32 public constant DEFAULT_ADMIN_ROLE = bytes32(0);
@@ -14,6 +15,7 @@ contract TreasuryVaultSkeletonTest is Test {
     address alice = makeAddr("alice");
 
     TreasuryVault vault;
+    MockERC3643 token;
 
     event Paused(address indexed by);
     event Unpaused(address indexed by);
@@ -23,6 +25,8 @@ contract TreasuryVaultSkeletonTest is Test {
 
     function setUp() public {
         vault = new TreasuryVault();
+        token = new MockERC3643();
+        token.transfer(address(vault), 100_000e18);
         vault.addCounterparty(alice, type(uint256).max);
     }
 
@@ -57,13 +61,13 @@ contract TreasuryVaultSkeletonTest is Test {
     function test_executeTransfer_whenPaused_reverts() external {
         vault.pause();
         vm.expectRevert(VaultPaused.selector);
-        vault.executeTransfer(address(0xbeef), alice, 100);
+        vault.executeTransfer(address(token), alice, 100);
     }
 
-    function test_executeTransfer_whenUnpaused_emitsTransferExecutedStub() external {
-        address token = address(0xbeef);
+    function test_executeTransfer_whenUnpaused_succeeds() external {
         vm.expectEmit();
-        emit TransferExecuted(token, alice, 100, address(this));
-        vault.executeTransfer(token, alice, 100);
+        emit TransferExecuted(address(token), alice, 100, address(this));
+        vault.executeTransfer(address(token), alice, 100);
+        assertEq(token.balanceOf(alice), 100);
     }
 }
