@@ -3,6 +3,10 @@ out/
 cache/
 broadcast/
 
+# --- Local Anvil runtime artifacts ---
+.anvil.log
+deployments/local.json
+
 # --- Node / TypeScript ---
 node_modules/
 dist/
