@@ -11,9 +11,9 @@ import { IERC3643 } from "./interfaces/IERC3643.sol";
 ///         own ERC-3643 compliance layer.
 /// @dev Vault pattern: the contract OWNS the tokens and is the single entry
 ///      point for transfers. The agent (AGENT_ROLE) can only act through this
-///      contract — no token transfers can bypass these policies. Designed for
-///      ETHGlobal Open Agents 2026 demo; production hardening (multisig admin,
-///      timelocks, SafeERC20, ONCHAINID) is deliberately out of scope here.
+///      contract - no token transfers can bypass these policies. Production
+///      hardening (multisig admin, timelocks, SafeERC20, ONCHAINID) is
+///      deliberately out of scope for this reference implementation.
 contract TreasuryVault is AccessControl {
     struct Counterparty {
         bool active;
