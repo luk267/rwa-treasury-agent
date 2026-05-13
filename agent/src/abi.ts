@@ -39,6 +39,14 @@ export const VAULT_ABI = [
     name: "VaultPaused",
     inputs: [],
   },
+  {
+    type: "error",
+    name: "AccessControlUnauthorizedAccount",
+    inputs: [
+      { name: "account", type: "address" },
+      { name: "neededRole", type: "bytes32" },
+    ],
+  },
 ] as const;
 
 export const IERC3643_ABI = [
