@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { createPublicClient, createWalletClient, http } from "viem";
+import { createPublicClient, createWalletClient, http, isAddressEqual } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
-// Anvil default mnemonic - Account #0. Same key the deploy script broadcasts with.
+// Anvil default mnemonic - Account #5. DeployLocal grants it AGENT_ROLE and nothing else.
 // Local-dev only; for Sepolia/Mainnet this would come from process.env.
-const ANVIL_ACCOUNT_0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
+const ANVIL_ACCOUNT_5 = "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba" as const;
 
 export interface Token {
   address: `0x${string}`;
@@ -25,10 +25,18 @@ export interface ExposureCap {
   cap: string;
 }
 
+export interface Roles {
+  admin: `0x${string}`;
+  treasurer: `0x${string}`;
+  pauser: `0x${string}`;
+  agent: `0x${string}`;
+}
+
 export interface Deployment {
   chainId: number;
   rpcUrl: string;
   vault: `0x${string}`;
+  roles: Roles;
   tokens: Token[];
   counterparties: Counterparty[];
   exposureCaps: ExposureCap[];
@@ -42,7 +50,13 @@ export function loadDeployment(path?: string): Deployment {
 }
 
 export function createClients(deployment: Deployment) {
-  const account = privateKeyToAccount(ANVIL_ACCOUNT_0);
+  const account = privateKeyToAccount(ANVIL_ACCOUNT_5);
+  if (!deployment.roles || !isAddressEqual(account.address, deployment.roles.agent)) {
+    throw new Error(
+      `Agent key ${account.address} is not the agent in deployments/local.json ` +
+        `(roles.agent = ${deployment.roles?.agent ?? "missing"}). Re-run ./scripts/local-dev.sh.`,
+    );
+  }
   const transport = http(deployment.rpcUrl);
 
   const publicClient = createPublicClient({

@@ -19,7 +19,7 @@ contract TreasuryVaultDailyCapTest is Test {
     );
 
     function setUp() public {
-        vault = new TreasuryVault();
+        vault = new TreasuryVault(1 days, address(this), address(this), address(this), address(this));
         token = new MockERC3643();
 
         // Fund the vault so transfers can actually move tokens

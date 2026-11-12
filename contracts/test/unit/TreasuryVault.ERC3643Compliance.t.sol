@@ -19,7 +19,7 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
     );
 
     function setUp() public {
-        vault = new TreasuryVault();
+        vault = new TreasuryVault(1 days, address(this), address(this), address(this), address(this));
         token = new MockERC3643();
         token.transfer(address(vault), 100_000e18);
         vault.addCounterparty(cp1, DAILY_CAP);

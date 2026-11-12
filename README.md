@@ -18,7 +18,7 @@ reasoning it emits off-chain is observability, not authorization.
 
 ## Status
 
-The vault and policy gates are complete (33 unit tests across 5 suites). The
+The vault and policy gates are complete (46 unit tests across 6 suites). The
 agent runtime is wired up against a local Anvil stack with all three MCP
 tools functional. Sepolia config is the next step.
 
@@ -128,7 +128,7 @@ See [`agent/README.md`](agent/README.md) for the agent details.
 contracts/
   src/TreasuryVault.sol         policy gate + ERC-3643 delegation
   src/interfaces/IERC3643.sol   minimal T-REX interface
-  test/unit/                    33 unit tests across 5 suites
+  test/unit/                    46 unit tests across 6 suites
   test/mocks/MockERC3643.sol    test double with toggleable compliance
   script/DeployLocal.s.sol      local Anvil deployment
 
@@ -154,11 +154,12 @@ forge test -vv         # full suite, verbose
 forge test --summary   # pass/fail summary
 ```
 
-Five suites cover the four policy gates and the ERC-3643 integration:
+Six suites cover the four policy gates, the role split and the ERC-3643 integration:
 
 | Suite                                   | Focus                                         |
 | --------------------------------------- | --------------------------------------------- |
 | `TreasuryVault.Skeleton.t.sol`          | Constructor, roles, pause / unpause           |
+| `TreasuryVault.Roles.t.sol`             | One account per role, two-step admin handover |
 | `TreasuryVault.Whitelist.t.sol`         | Counterparty add / deactivate, whitelist gate |
 | `TreasuryVault.DailyCap.t.sol`          | Per-counterparty daily cap, day-bucket reset  |
 | `TreasuryVault.ExposureCap.t.sol`       | Per-asset daily exposure cap                  |

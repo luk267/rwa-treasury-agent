@@ -24,13 +24,13 @@ contract TreasuryVaultSkeletonTest is Test {
     error VaultPaused();
 
     function setUp() public {
-        vault = new TreasuryVault();
+        vault = new TreasuryVault(1 days, address(this), address(this), address(this), address(this));
         token = new MockERC3643();
         token.transfer(address(vault), 100_000e18);
         vault.addCounterparty(alice, type(uint256).max);
     }
 
-    function test_constructor_grantsAllRolesToDeployer() external view {
+    function test_constructor_grantsAllRolesToOneAccount() external view {
         assertTrue(vault.hasRole(DEFAULT_ADMIN_ROLE, address(this)), "missing DEFAULT_ADMIN_ROLE");
         assertTrue(vault.hasRole(TREASURER_ROLE, address(this)), "missing TREASURER_ROLE");
         assertTrue(vault.hasRole(AGENT_ROLE, address(this)), "missing AGENT_ROLE");

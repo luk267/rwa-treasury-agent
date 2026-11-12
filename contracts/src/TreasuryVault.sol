@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.38;
 
-import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
+import {
+    AccessControlDefaultAdminRules
+} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
 import { IERC3643 } from "./interfaces/IERC3643.sol";
 
 /// @title TreasuryVault
@@ -11,10 +13,13 @@ import { IERC3643 } from "./interfaces/IERC3643.sol";
 ///         own ERC-3643 compliance layer.
 /// @dev Vault pattern: the contract OWNS the tokens and is the single entry
 ///      point for transfers. The agent (AGENT_ROLE) can only act through this
-///      contract - no token transfers can bypass these policies. Production
-///      hardening (multisig admin, timelocks, SafeERC20, ONCHAINID) is
-///      deliberately out of scope for this reference implementation.
-contract TreasuryVault is AccessControl {
+///      contract - no token transfers can bypass these policies. Each role is
+///      assigned to its own account at construction. The admin role follows
+///      OpenZeppelin's AccessControlDefaultAdminRules: a single admin, handed over
+///      in two steps with a delay. Production hardening (multisig admin,
+///      SafeERC20, ONCHAINID) is deliberately out of scope for this reference
+///      implementation.
+contract TreasuryVault is AccessControlDefaultAdminRules {
     struct Counterparty {
         bool active;
         uint256 dailyCap;
@@ -54,14 +59,24 @@ contract TreasuryVault is AccessControl {
     error InvalidCounterparty();
     error CounterpartyAlreadyActive();
     error CounterpartyNotActive();
+    error ZeroAddress();
 
-    /// @notice Grants the deployer all four roles for the demo. Production setups
-    ///         must split these (Treasurer = multisig, Pauser = hot-key, etc.).
-    constructor() {
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(TREASURER_ROLE, msg.sender);
-        _grantRole(AGENT_ROLE, msg.sender);
-        _grantRole(PAUSER_ROLE, msg.sender);
+    /// @notice Assigns each role to the account passed in. The deployer gets no role
+    ///         unless it is passed explicitly.
+    /// @dev The base constructor rejects a zero `admin` with AccessControlInvalidDefaultAdmin.
+    ///      The other three roles revert with ZeroAddress. Emits RoleGranted per role.
+    /// @param adminTransferDelay Seconds a new admin must wait before accepting the handover.
+    /// @param admin Holder of DEFAULT_ADMIN_ROLE: grants and revokes the other roles.
+    /// @param treasurer Holder of TREASURER_ROLE: manages counterparties and exposure caps.
+    /// @param agent Holder of AGENT_ROLE: the only account that can call executeTransfer.
+    /// @param pauser Holder of PAUSER_ROLE: can pause and unpause the vault.
+    constructor(uint48 adminTransferDelay, address admin, address treasurer, address agent, address pauser)
+        AccessControlDefaultAdminRules(adminTransferDelay, admin)
+    {
+        if (treasurer == address(0) || agent == address(0) || pauser == address(0)) revert ZeroAddress();
+        _grantRole(TREASURER_ROLE, treasurer);
+        _grantRole(AGENT_ROLE, agent);
+        _grantRole(PAUSER_ROLE, pauser);
     }
 
     modifier whenNotPaused() {

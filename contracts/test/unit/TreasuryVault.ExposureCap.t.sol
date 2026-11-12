@@ -26,7 +26,7 @@ contract TreasuryVaultExposureCapTest is Test {
     event ExposureCapSet(address indexed asset, uint256 cap);
 
     function setUp() public {
-        vault = new TreasuryVault();
+        vault = new TreasuryVault(1 days, address(this), address(this), address(this), address(this));
         token = new MockERC3643();
         token.transfer(address(vault), 100_000e18);
 

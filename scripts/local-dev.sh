@@ -7,9 +7,6 @@ RPC_URL="http://127.0.0.1:8545"
 DEPLOYMENTS_DIR="$REPO_ROOT/deployments"
 LOG_FILE="$REPO_ROOT/.anvil.log"
 
-# Default Foundry mnemonic - Account #0 is deployer + agent.
-DEPLOYER_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-
 cleanup() {
   if [[ -n "${ANVIL_PID:-}" ]] && kill -0 "$ANVIL_PID" 2>/dev/null; then
     echo "Stopping Anvil (pid=$ANVIL_PID)..."
@@ -40,12 +37,13 @@ for i in {1..50}; do
   fi
 done
 
+# DeployLocal derives its keys from the default Anvil mnemonic (one account per role),
+# so no --private-key is passed here.
 echo "Deploying contracts..."
 DEPLOY_OUT=$(
   cd "$REPO_ROOT/contracts" && \
   forge script script/DeployLocal.s.sol:DeployLocal \
     --rpc-url "$RPC_URL" \
-    --private-key "$DEPLOYER_KEY" \
     --broadcast \
     -vvv
 )
@@ -62,6 +60,10 @@ CP1_CAP_WEI=$(extract cp1DailyCap)
 CP2_CAP_WEI=$(extract cp2DailyCap)
 EXPOSURE_WEI=$(extract mockExposureCap)
 FUNDING_WEI=$(extract vaultFunding)
+ADMIN=$(extract admin)
+TREASURER=$(extract treasurer)
+PAUSER=$(extract pauser)
+AGENT=$(extract agent)
 
 to_human() {
   local wei=$1
@@ -75,6 +77,12 @@ cat > "$DEPLOYMENTS_DIR/local.json" <<EOF
   "chainId": 31337,
   "rpcUrl": "$RPC_URL",
   "vault": "$VAULT",
+  "roles": {
+    "admin": "$ADMIN",
+    "treasurer": "$TREASURER",
+    "pauser": "$PAUSER",
+    "agent": "$AGENT"
+  },
   "tokens": [
     { "address": "$MOCK", "symbol": "MOCK", "decimals": 18 }
   ],
@@ -93,6 +101,7 @@ echo ""
 echo "Ready."
 echo "  Vault:     $VAULT"
 echo "  Mock:      $MOCK"
+echo "  Agent:     $AGENT  (AGENT_ROLE only)"
 echo "  Funding:   $(to_human "$FUNDING_WEI") MOCK"
 echo "  Anvil PID: $ANVIL_PID  (Ctrl+C to stop)"
 echo ""

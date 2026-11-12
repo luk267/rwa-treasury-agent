@@ -81,9 +81,11 @@ Copy `../.env.example` to `.env`. The agent reads two variables:
 | `AGENT_MODEL`       | no       | Claude model ID. Defaults to `claude-sonnet-4-6`. |
 
 `RPC_URL_SEPOLIA` and `PRIVATE_KEY` are for non-local networks. Sepolia wiring
-is not yet enabled - the current [`src/config.ts`](src/config.ts) hardcodes the
-Anvil account and the `foundry` chain, with a Sepolia path planned as the
-next milestone.
+is not yet enabled - the current [`src/config.ts`](src/config.ts) hardcodes
+Anvil account #5 and the `foundry` chain, with a Sepolia path planned as the
+next milestone. Account #5 holds `AGENT_ROLE` and no other role. At startup the
+agent checks that its key matches `roles.agent` in `deployments/local.json` and
+exits with an error otherwise.
 
 ## Source layout
 

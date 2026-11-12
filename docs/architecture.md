@@ -37,18 +37,41 @@ say - even a vault-approved transfer can be blocked by ERC-3643 compliance.
 
 ## Roles
 
-The vault uses OpenZeppelin `AccessControl` with three role-gated capabilities.
+The vault uses OpenZeppelin `AccessControlDefaultAdminRules` with three
+role-gated capabilities and one admin.
 
 | Role                 | Granted by  | Capabilities                                                                       |
 | -------------------- | ----------- | ---------------------------------------------------------------------------------- |
 | `DEFAULT_ADMIN_ROLE` | Constructor | Grant and revoke other roles.                                                      |
-| `TREASURER_ROLE`     | Admin       | `addCounterparty`, `deactivateCounterparty`, `setExposureCap`.                     |
-| `AGENT_ROLE`         | Admin       | `executeTransfer` - the only on-chain entry point that moves tokens.               |
-| `PAUSER_ROLE`        | Admin       | `pause`, `unpause`.                                                                |
+| `TREASURER_ROLE`     | Constructor | `addCounterparty`, `deactivateCounterparty`, `setExposureCap`.                     |
+| `AGENT_ROLE`         | Constructor | `executeTransfer` - the only on-chain entry point that moves tokens.               |
+| `PAUSER_ROLE`        | Constructor | `pause`, `unpause`.                                                                |
 
-The constructor grants all four roles to the deployer for convenience in the
-local stack and tests. A production deployment would split them: Treasurer =
-multisig, Pauser = fast-response key, Agent = the agent's wallet.
+The constructor takes one address per role. The deployer gets no role unless
+it passes its own address. The agent's key therefore holds `AGENT_ROLE` only:
+it cannot whitelist a counterparty, raise a cap, unpause, or grant itself a
+role. The admin can grant and revoke all roles later.
+
+The local stack uses one Anvil account per role:
+
+| Account | Role                                |
+| ------- | ----------------------------------- |
+| #0      | `DEFAULT_ADMIN_ROLE` and deployer   |
+| #1, #2  | Counterparties `cp1`, `cp2`         |
+| #3      | `TREASURER_ROLE`                    |
+| #4      | `PAUSER_ROLE`                       |
+| #5      | `AGENT_ROLE` (the agent's key)      |
+
+**Admin handover.** There is exactly one admin. `grantRole(DEFAULT_ADMIN_ROLE, …)`
+is blocked. A handover takes two steps: the admin calls
+`beginDefaultAdminTransfer(newAdmin)`, and the new admin calls
+`acceptDefaultAdminTransfer()` once the delay has passed (one day in the local
+stack). A typo in the address or a stolen admin key cannot move the role in a
+single transaction, and the current admin can cancel during the delay.
+
+**Stopping the agent.** The pauser calls `pause()`: every `executeTransfer`
+reverts until `unpause()`. To lock the agent out for good, the admin calls
+`revokeRole(AGENT_ROLE, agent)`.
 
 ---
 
@@ -124,12 +147,12 @@ real T-REX deployment.
 
 ## Trust model
 
-| Component                  | Trusted to                                                     | Not trusted to                                            |
-| -------------------------- | -------------------------------------------------------------- | --------------------------------------------------------- |
-| Agent (TypeScript)         | Propose a transfer, simulate it, explain the resulting event.  | Choose recipients, choose amounts, bypass any gate.       |
-| `TreasuryVault.sol`        | Apply gates 1–4 in order. Emit a faithful outcome event.       | Decide jurisdiction / KYC / transfer-rule compliance.     |
-| ERC-3643 token             | Final compliance decision (identity, claims, transfer rules).  | Provide reasoning suitable for off-chain explanation.     |
-| Treasurer / Pauser keys    | Hold the configuration authority and the kill-switch.          | (Out of scope for this PoC - assumed non-malicious.)      |
+| Component                       | Trusted to                                                             | Not trusted to                                        |
+| ------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
+| Agent (TypeScript)              | Propose a transfer, simulate it, explain the resulting event.          | Choose recipients, choose amounts, bypass any gate.   |
+| `TreasuryVault.sol`             | Apply gates 1–4 in order. Emit a faithful outcome event.               | Decide jurisdiction / KYC / transfer-rule compliance. |
+| ERC-3643 token                  | Final compliance decision (identity, claims, transfer rules).          | Provide reasoning suitable for off-chain explanation. |
+| Admin / Treasurer / Pauser keys | Hold role management, the configuration authority and the kill-switch. | (Out of scope for this PoC - assumed non-malicious.)  |
 
 The reasoning the agent emits off-chain is observability, not authorization.
 The contract makes no assumption that the caller is honest, correct, or even
@@ -143,8 +166,8 @@ These are deliberate omissions for the current iteration. They would be
 required for a production deployment but are not part of the design goal,
 which is to validate the three-layer policy + agent integration.
 
-- **Multisig admin / timelocks.** All four roles are granted to a single
-  EOA at construction.
+- **Multisig admin.** Each role sits on its own key, and the admin handover is
+  two-step with a delay. The admin itself is still a single EOA, not a multisig.
 - **`SafeERC20`.** The vault calls `token.transfer` directly inside
   `try`/`catch`. A real T-REX integration would use the safe wrapper.
 - **`ONCHAINID` on the vault itself.** The vault is a contract holder; some
