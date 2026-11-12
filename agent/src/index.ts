@@ -43,7 +43,7 @@ const q = query({
       "mcp__vault__check_transfer_feasibility",
       "mcp__vault__execute_transfer",
     ],
-    model: "claude-sonnet-4-6",
+    model: process.env.AGENT_MODEL || "claude-sonnet-4-6",
     permissionMode: "bypassPermissions",
     settingSources: [],
   },

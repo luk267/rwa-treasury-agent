@@ -60,6 +60,7 @@ local stack script:
 Then, in `agent/`:
 
 ```bash
+cp ../.env.example .env                    # then set ANTHROPIC_API_KEY
 npm install
 npm run typecheck                          # tsc --noEmit
 npm start "show the vault holdings"
@@ -72,9 +73,15 @@ so the policy decisions are visible during the run.
 
 ## Configuration
 
-For non-local networks, copy `../.env.example` to `.env` and fill in
-`RPC_URL_SEPOLIA`, `PRIVATE_KEY`, and `ANTHROPIC_API_KEY`. Sepolia wiring is
-not yet enabled - the current [`src/config.ts`](src/config.ts) hardcodes the
+Copy `../.env.example` to `.env`. The agent reads two variables:
+
+| Variable            | Required | Purpose                                           |
+| ------------------- | -------- | ------------------------------------------------- |
+| `ANTHROPIC_API_KEY` | yes      | Authenticates the Claude Agent SDK.               |
+| `AGENT_MODEL`       | no       | Claude model ID. Defaults to `claude-sonnet-4-6`. |
+
+`RPC_URL_SEPOLIA` and `PRIVATE_KEY` are for non-local networks. Sepolia wiring
+is not yet enabled - the current [`src/config.ts`](src/config.ts) hardcodes the
 Anvil account and the `foundry` chain, with a Sepolia path planned as the
 next milestone.
 

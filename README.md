@@ -100,6 +100,7 @@ Agent (with the local stack running):
 
 ```bash
 cd agent && npm install
+cp ../.env.example .env        # then set ANTHROPIC_API_KEY
 npm start "show the vault holdings"
 npm start "transfer 500 MOCK to cp1"
 ```
