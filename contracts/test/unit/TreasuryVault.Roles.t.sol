@@ -30,6 +30,8 @@ contract TreasuryVaultRolesTest is Test {
     function setUp() public {
         vault = new TreasuryVault(ADMIN_DELAY, admin, treasurer, agent, pauser);
         token = new MockERC3643();
+        token.setVerified(address(vault), true);
+        token.setVerified(cp1, true);
         assertTrue(token.transfer(address(vault), 100_000e18));
 
         vm.prank(treasurer);

@@ -27,6 +27,7 @@ contract TreasuryVaultWhitelistTest is Test {
     function setUp() public {
         vault = new TreasuryVault(1 days, address(this), address(this), address(this), address(this));
         token = new MockERC3643();
+        token.setVerified(address(vault), true);
         token.transfer(address(vault), 100_000e18);
         vault.addCounterparty(alice, type(uint256).max);
     }

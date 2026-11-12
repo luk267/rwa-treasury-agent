@@ -28,9 +28,9 @@ say - even a vault-approved transfer can be blocked by ERC-3643 compliance.
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | `TreasuryVault.sol`       | Holds ERC-3643 tokens. Enforces four policy gates. Calls the token's `transfer` and surfaces the outcome as an event.      | `contracts/src/`               |
 | `IERC3643.sol`            | Minimal interface used by the vault - `transfer`, `transferFrom`, `balanceOf`. Intentionally narrow.                       | `contracts/src/interfaces/`    |
-| `MockERC3643.sol`         | Test double: ERC-20 with a flag that toggles `transfer` reverts to simulate ERC-3643 compliance failures.                  | `contracts/test/mocks/`        |
+| `MockERC3643.sol`         | Test double modelled on T-REX v5: checks pause, freeze, balance, recipient identity and compliance in that order and reverts with the v5 error names. Its deployer is the issuer agent: verifies wallets, freezes, pauses, forces transfers. | `contracts/test/mocks/`        |
 | TypeScript agent          | MCP server exposing three tools to a Claude model (read holdings, simulate, submit). System prompt requires simulate before execute and maps `RejectReason` back to plain language. | `agent/src/` |
-| `DeployLocal.s.sol`       | Foundry script: deploys both contracts, funds the vault, whitelists two counterparties, sets an exposure cap.              | `contracts/script/`            |
+| `DeployLocal.s.sol`       | Foundry script: deploys both contracts, verifies the vault, `cp1` and `cp2` in the token, funds the vault, whitelists three counterparties, sets an exposure cap. | `contracts/script/`            |
 | `scripts/local-dev.sh`    | Starts Anvil, runs the deploy script, parses output, writes `deployments/local.json`.                                      | `scripts/`                     |
 
 ---
@@ -56,11 +56,12 @@ The local stack uses one Anvil account per role:
 
 | Account | Role                                |
 | ------- | ----------------------------------- |
-| #0      | `DEFAULT_ADMIN_ROLE` and deployer   |
+| #0      | `DEFAULT_ADMIN_ROLE`, deployer and token issuer |
 | #1, #2  | Counterparties `cp1`, `cp2`         |
 | #3      | `TREASURER_ROLE`                    |
 | #4      | `PAUSER_ROLE`                       |
 | #5      | `AGENT_ROLE` (the agent's key)      |
+| #6      | Counterparty `cp3`: whitelisted in the vault, not verified in the token |
 
 **Admin handover.** There is exactly one admin. `grantRole(DEFAULT_ADMIN_ROLE, …)`
 is blocked. A handover takes two steps: the admin calls
@@ -153,6 +154,7 @@ real T-REX deployment.
 | `TreasuryVault.sol`             | Apply gates 1–4 in order. Emit a faithful outcome event.               | Decide jurisdiction / KYC / transfer-rule compliance. |
 | ERC-3643 token                  | Final compliance decision (identity, claims, transfer rules).          | Provide reasoning suitable for off-chain explanation. |
 | Admin / Treasurer / Pauser keys | Hold role management, the configuration authority and the kill-switch. | (Out of scope for this PoC - assumed non-malicious.)  |
+| Token issuer (ERC-3643 "agent") | Verify identities, freeze wallets, pause the token, force transfers. ERC-3643 requires these rights. | Respect the vault's gates: a forced transfer moves the vault's tokens without a vault event and without touching its counters. |
 
 The reasoning the agent emits off-chain is observability, not authorization.
 The contract makes no assumption that the caller is honest, correct, or even
@@ -170,8 +172,10 @@ which is to validate the three-layer policy + agent integration.
   two-step with a delay. The admin itself is still a single EOA, not a multisig.
 - **`SafeERC20`.** The vault calls `token.transfer` directly inside
   `try`/`catch`. A real T-REX integration would use the safe wrapper.
-- **`ONCHAINID` on the vault itself.** The vault is a contract holder; some
-  compliance modules require an attached ONCHAINID for the contract.
+- **`ONCHAINID` on the vault itself.** ERC-3643 only delivers to verified
+  recipients, and the vault is one. Before it can be funded, the issuer must
+  register it in the identity registry with an ONCHAINID. The mock stubs this
+  with `setVerified`.
 - **Mainnet or Sepolia deployment.** Currently local Anvil only. Sepolia
   is planned.
 
@@ -183,7 +187,8 @@ which is to validate the three-layer policy + agent integration.
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Policy gates in order, event emissions, role checks  | [`contracts/src/TreasuryVault.sol`](../contracts/src/TreasuryVault.sol)                                                         |
 | ERC-3643 surface used by the vault                   | [`contracts/src/interfaces/IERC3643.sol`](../contracts/src/interfaces/IERC3643.sol)                                             |
-| Test double with toggleable compliance reverts       | [`contracts/test/mocks/MockERC3643.sol`](../contracts/test/mocks/MockERC3643.sol)                                               |
+| Test double modelled on T-REX v5                     | [`contracts/test/mocks/MockERC3643.sol`](../contracts/test/mocks/MockERC3643.sol)                                               |
+| Token-side rejections and issuer rights              | [`contracts/test/unit/TreasuryVault.IssuerRights.t.sol`](../contracts/test/unit/TreasuryVault.IssuerRights.t.sol)               |
 | Counters-not-consumed-on-reject test                 | [`contracts/test/unit/TreasuryVault.ERC3643Compliance.t.sol`](../contracts/test/unit/TreasuryVault.ERC3643Compliance.t.sol)     |
 | Local deployment script                              | [`contracts/script/DeployLocal.s.sol`](../contracts/script/DeployLocal.s.sol)                                                   |
 | Anvil bootstrap + deployment-info writer             | [`scripts/local-dev.sh`](../scripts/local-dev.sh)                                                                               |

@@ -21,19 +21,21 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
     function setUp() public {
         vault = new TreasuryVault(1 days, address(this), address(this), address(this), address(this));
         token = new MockERC3643();
+        token.setVerified(address(vault), true);
+        token.setVerified(cp1, true);
         token.transfer(address(vault), 100_000e18);
         vault.addCounterparty(cp1, DAILY_CAP);
     }
 
-    /// @dev When the ERC-3643 token rejects the transfer (e.g. missing KYC claim),
+    /// @dev When the ERC-3643 token rejects the transfer (here: the compliance contract says no),
     ///      the vault must NOT revert. Instead it emits TransferRejected with the
     ///      revert reason from the token so the agent can read it.
     function test_executeTransfer_erc3643Rejects_emitsRejectedWithReason() external {
-        // Disable compliance on the mock - simulates a KYC/identity failure
-        token.setCompliantTransfersEnabled(false);
+        // Make the stubbed compliance contract refuse every transfer
+        token.setCompliance(false);
 
-        // Build the expected revert reason: MockComplianceBlock(cp1, 500e18)
-        bytes memory expectedReason = abi.encodeWithSelector(MockERC3643.MockComplianceBlock.selector, cp1, 500e18);
+        // The token's revert data is the bare ComplianceNotFollowed() selector
+        bytes memory expectedReason = abi.encodeWithSelector(MockERC3643.ComplianceNotFollowed.selector);
 
         vm.expectEmit();
         emit TransferRejected(address(token), cp1, 500e18, TreasuryVault.RejectReason.ERC3643Compliance, expectedReason);
@@ -45,7 +47,7 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
         uint256 vaultBalanceBefore = token.balanceOf(address(vault));
         uint256 cp1BalanceBefore = token.balanceOf(cp1);
 
-        token.setCompliantTransfersEnabled(false);
+        token.setCompliance(false);
         vault.executeTransfer(address(token), cp1, 500e18);
 
         assertEq(token.balanceOf(address(vault)), vaultBalanceBefore, "vault balance should be unchanged");
@@ -56,11 +58,11 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
     ///      Otherwise the agent loses budget for a transfer that never happened.
     function test_executeTransfer_erc3643Rejects_dailyCapNotConsumed() external {
         // First: fail a 500-token transfer
-        token.setCompliantTransfersEnabled(false);
+        token.setCompliance(false);
         vault.executeTransfer(address(token), cp1, 500e18);
 
         // Re-enable compliance
-        token.setCompliantTransfersEnabled(true);
+        token.setCompliance(true);
 
         // Now transfer the full daily cap - this should succeed because the
         // failed transfer must not have consumed any cap budget.

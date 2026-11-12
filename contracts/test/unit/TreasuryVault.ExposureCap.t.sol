@@ -28,6 +28,9 @@ contract TreasuryVaultExposureCapTest is Test {
     function setUp() public {
         vault = new TreasuryVault(1 days, address(this), address(this), address(this), address(this));
         token = new MockERC3643();
+        token.setVerified(address(vault), true);
+        token.setVerified(cp1, true);
+        token.setVerified(cp2, true);
         token.transfer(address(vault), 100_000e18);
 
         // Both counterparties have high daily caps - the asset exposure cap
@@ -114,6 +117,8 @@ contract TreasuryVaultExposureCapTest is Test {
     /// @dev When no exposure cap is set (0), transfers are unlimited.
     function test_executeTransfer_noExposureCap_unlimited() external {
         MockERC3643 uncappedToken = new MockERC3643();
+        uncappedToken.setVerified(address(vault), true);
+        uncappedToken.setVerified(cp1, true);
         uncappedToken.transfer(address(vault), 100_000e18);
         // No setExposureCap call - cap stays at default 0
 
@@ -124,6 +129,8 @@ contract TreasuryVaultExposureCapTest is Test {
     /// @dev Exposure cap on one asset must not affect another asset.
     function test_executeTransfer_exposureCap_perAssetIsolation() external {
         MockERC3643 tokenB = new MockERC3643();
+        tokenB.setVerified(address(vault), true);
+        tokenB.setVerified(cp1, true);
         tokenB.transfer(address(vault), 100_000e18);
         // tokenB has no exposure cap
 

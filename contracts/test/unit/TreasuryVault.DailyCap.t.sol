@@ -22,6 +22,10 @@ contract TreasuryVaultDailyCapTest is Test {
         vault = new TreasuryVault(1 days, address(this), address(this), address(this), address(this));
         token = new MockERC3643();
 
+        // The test contract deployed the token, so it is the issuer and can verify holders.
+        token.setVerified(address(vault), true);
+        token.setVerified(cp1, true);
+
         // Fund the vault so transfers can actually move tokens
         token.transfer(address(vault), 100_000e18);
 

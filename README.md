@@ -18,7 +18,7 @@ reasoning it emits off-chain is observability, not authorization.
 
 ## Status
 
-The vault and policy gates are complete (46 unit tests across 6 suites). The
+The vault and policy gates are complete (53 unit tests across 7 suites). The
 agent runtime is wired up against a local Anvil stack with all three MCP
 tools functional. Sepolia config is the next step.
 
@@ -95,8 +95,10 @@ Local end-to-end stack (Anvil + deployed vault + funded mock token):
 ```
 
 The script starts Anvil, deploys `TreasuryVault` and `MockERC3643`,
-whitelists two counterparties, sets an exposure cap, and writes addresses to
-`deployments/local.json`. Anvil runs until you Ctrl+C.
+whitelists three counterparties, sets an exposure cap, and writes addresses to
+`deployments/local.json`. The token verifies the vault, `cp1` and `cp2`. It
+does not verify `cp3`, so a transfer to `cp3` passes the vault's gates and is
+then rejected by the token with `UnverifiedIdentity()`. Anvil runs until you Ctrl+C.
 
 Agent (with the local stack running):
 
@@ -128,8 +130,8 @@ See [`agent/README.md`](agent/README.md) for the agent details.
 contracts/
   src/TreasuryVault.sol         policy gate + ERC-3643 delegation
   src/interfaces/IERC3643.sol   minimal T-REX interface
-  test/unit/                    46 unit tests across 6 suites
-  test/mocks/MockERC3643.sol    test double with toggleable compliance
+  test/unit/                    53 unit tests across 7 suites
+  test/mocks/MockERC3643.sol    T-REX v5-style test double: identity, freeze, pause, forced transfer
   script/DeployLocal.s.sol      local Anvil deployment
 
 agent/
@@ -154,7 +156,7 @@ forge test -vv         # full suite, verbose
 forge test --summary   # pass/fail summary
 ```
 
-Six suites cover the four policy gates, the role split and the ERC-3643 integration:
+Seven suites cover the four policy gates, the role split and the ERC-3643 integration:
 
 | Suite                                   | Focus                                         |
 | --------------------------------------- | --------------------------------------------- |
@@ -164,6 +166,7 @@ Six suites cover the four policy gates, the role split and the ERC-3643 integrat
 | `TreasuryVault.DailyCap.t.sol`          | Per-counterparty daily cap, day-bucket reset  |
 | `TreasuryVault.ExposureCap.t.sol`       | Per-asset daily exposure cap                  |
 | `TreasuryVault.ERC3643Compliance.t.sol` | try/catch on the token's compliance check     |
+| `TreasuryVault.IssuerRights.t.sol`      | Token-side rejections, issuer forced transfer |
 
 ---
 
