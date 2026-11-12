@@ -1,5 +1,7 @@
 # Compliant RWA Treasury with an AI Agent
 
+[![CI](https://github.com/luk267/rwa-treasury-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/luk267/rwa-treasury-agent/actions/workflows/ci.yml)
+
 A treasury vault holds ERC-3643 security tokens. An AI agent proposes
 transfers, but the vault treats it as an untrusted caller: four deterministic
 on-chain gates (pause, counterparty whitelist, daily cap, per-asset exposure
@@ -79,7 +81,7 @@ reference are in [`docs/architecture.md`](docs/architecture.md).
 
 ## Quick start
 
-Requires Foundry and Node.js 20+.
+Requires Foundry 1.9.0 and Node.js 22+.
 
 ```bash
 git submodule update --init --recursive
@@ -113,10 +115,10 @@ See [`agent/README.md`](agent/README.md) for the agent details.
 
 | Layer     | Tooling                                                               |
 | --------- | --------------------------------------------------------------------- |
-| Contracts | Solidity 0.8.28, Foundry, OpenZeppelin `AccessControl`                |
+| Contracts | Solidity 0.8.38, Foundry 1.9.0, OpenZeppelin `AccessControl`          |
 | Token     | ERC-3643 (T-REX) interface; `MockERC3643` for local tests             |
-| Agent     | TypeScript (strict), Node 20+, viem, `@anthropic-ai/claude-agent-sdk` |
-| CI        | GitHub Actions: `forge build` + `forge test`, `tsc --noEmit`          |
+| Agent     | TypeScript (strict), Node 22+, viem, `@anthropic-ai/claude-agent-sdk` |
+| CI        | GitHub Actions: `forge fmt`, `lint`, `build`, `test`; `tsc --noEmit`  |
 
 ---
 

@@ -4,6 +4,9 @@
   "private": true,
   "description": "TypeScript orchestrator for the rwa-treasury-agent - simulates and executes compliant transfers.",
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
