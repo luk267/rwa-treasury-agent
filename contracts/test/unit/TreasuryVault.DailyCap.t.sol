@@ -51,9 +51,7 @@ contract TreasuryVaultDailyCapTest is Test {
 
         // Second transfer: 600 + 500 = 1100 > 1000 cap
         vm.expectEmit();
-        emit TransferRejected(
-            address(token), cp1, 500e18, TreasuryVault.RejectReason.DailyCapExceeded, ""
-        );
+        emit TransferRejected(address(token), cp1, 500e18, TreasuryVault.RejectReason.DailyCapExceeded, "");
         vault.executeTransfer(address(token), cp1, 500e18);
 
         // Only the first 600 should have arrived
@@ -74,9 +72,7 @@ contract TreasuryVaultDailyCapTest is Test {
 
         // This should be rejected - cap is full
         vm.expectEmit();
-        emit TransferRejected(
-            address(token), cp1, 100e18, TreasuryVault.RejectReason.DailyCapExceeded, ""
-        );
+        emit TransferRejected(address(token), cp1, 100e18, TreasuryVault.RejectReason.DailyCapExceeded, "");
         vault.executeTransfer(address(token), cp1, 100e18);
 
         // Fast-forward 1 day

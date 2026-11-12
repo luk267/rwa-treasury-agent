@@ -15,9 +15,9 @@ contract DeployLocal is Script {
     address constant CP2 = 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC;
 
     uint256 constant VAULT_FUNDING = 100_000 * 1e18;
-    uint256 constant CP1_DAILY_CAP = 5_000 * 1e18;
-    uint256 constant CP2_DAILY_CAP = 1_000 * 1e18;
-    uint256 constant MOCK_EXPOSURE_CAP = 8_000 * 1e18;
+    uint256 constant CP1_DAILY_CAP = 5000 * 1e18;
+    uint256 constant CP2_DAILY_CAP = 1000 * 1e18;
+    uint256 constant MOCK_EXPOSURE_CAP = 8000 * 1e18;
 
     function run() external {
         vm.startBroadcast();

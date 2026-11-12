@@ -33,14 +33,10 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
         token.setCompliantTransfersEnabled(false);
 
         // Build the expected revert reason: MockComplianceBlock(cp1, 500e18)
-        bytes memory expectedReason = abi.encodeWithSelector(
-            MockERC3643.MockComplianceBlock.selector, cp1, 500e18
-        );
+        bytes memory expectedReason = abi.encodeWithSelector(MockERC3643.MockComplianceBlock.selector, cp1, 500e18);
 
         vm.expectEmit();
-        emit TransferRejected(
-            address(token), cp1, 500e18, TreasuryVault.RejectReason.ERC3643Compliance, expectedReason
-        );
+        emit TransferRejected(address(token), cp1, 500e18, TreasuryVault.RejectReason.ERC3643Compliance, expectedReason);
         vault.executeTransfer(address(token), cp1, 500e18);
     }
 

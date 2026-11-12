@@ -14,7 +14,7 @@ contract TreasuryVaultExposureCapTest is Test {
     address alice = makeAddr("alice");
 
     uint256 constant DAILY_CAP = type(uint256).max;
-    uint256 constant EXPOSURE_CAP = 5_000e18;
+    uint256 constant EXPOSURE_CAP = 5000e18;
 
     TreasuryVault vault;
     MockERC3643 token;
@@ -68,24 +68,22 @@ contract TreasuryVaultExposureCapTest is Test {
 
     /// @dev Single transfer under exposure cap should succeed.
     function test_executeTransfer_underExposureCap_succeeds() external {
-        vault.executeTransfer(address(token), cp1, 3_000e18);
-        assertEq(token.balanceOf(cp1), 3_000e18);
+        vault.executeTransfer(address(token), cp1, 3000e18);
+        assertEq(token.balanceOf(cp1), 3000e18);
     }
 
     /// @dev Two transfers to DIFFERENT counterparties that together exceed the
     ///      per-asset cap. The second should be rejected.
     function test_executeTransfer_twoCounterparties_exceedsExposureCap_rejected() external {
         // 3000 to cp1 - ok (3000 < 5000)
-        vault.executeTransfer(address(token), cp1, 3_000e18);
+        vault.executeTransfer(address(token), cp1, 3000e18);
 
         // 3000 to cp2 - rejected (3000 + 3000 = 6000 > 5000 cap)
         vm.expectEmit();
-        emit TransferRejected(
-            address(token), cp2, 3_000e18, TreasuryVault.RejectReason.ExposureCapExceeded, ""
-        );
-        vault.executeTransfer(address(token), cp2, 3_000e18);
+        emit TransferRejected(address(token), cp2, 3000e18, TreasuryVault.RejectReason.ExposureCapExceeded, "");
+        vault.executeTransfer(address(token), cp2, 3000e18);
 
-        assertEq(token.balanceOf(cp1), 3_000e18);
+        assertEq(token.balanceOf(cp1), 3000e18);
         assertEq(token.balanceOf(cp2), 0);
     }
 
@@ -102,17 +100,15 @@ contract TreasuryVaultExposureCapTest is Test {
 
         // Should be rejected now
         vm.expectEmit();
-        emit TransferRejected(
-            address(token), cp2, 1_000e18, TreasuryVault.RejectReason.ExposureCapExceeded, ""
-        );
-        vault.executeTransfer(address(token), cp2, 1_000e18);
+        emit TransferRejected(address(token), cp2, 1000e18, TreasuryVault.RejectReason.ExposureCapExceeded, "");
+        vault.executeTransfer(address(token), cp2, 1000e18);
 
         // Fast-forward 1 day
         vm.warp(block.timestamp + 1 days);
 
         // Now it should work - new day bucket
-        vault.executeTransfer(address(token), cp2, 1_000e18);
-        assertEq(token.balanceOf(cp2), 1_000e18);
+        vault.executeTransfer(address(token), cp2, 1000e18);
+        assertEq(token.balanceOf(cp2), 1000e18);
     }
 
     /// @dev When no exposure cap is set (0), transfers are unlimited.
