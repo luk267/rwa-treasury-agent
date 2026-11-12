@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.28;
+pragma solidity 0.8.38;
 
 /// @title IERC3643
 /// @notice Minimal subset of the ERC-3643 token interface used by the Treasury Vault.

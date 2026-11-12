@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.28;
+pragma solidity 0.8.38;
 
 import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
 import { IERC3643 } from "./interfaces/IERC3643.sol";
@@ -99,6 +99,9 @@ contract TreasuryVault is AccessControl {
     /// @param token The ERC-3643 token to transfer.
     /// @param to The recipient counterparty.
     /// @param amount The token amount.
+    // `token` is only written after a successful transfer. A call to an address without code
+    // fails to decode its empty return data and reverts, so the zero address never gets there.
+    // forge-lint: disable-next-line(missing-zero-check)
     function executeTransfer(address token, address to, uint256 amount) external onlyRole(AGENT_ROLE) whenNotPaused {
         // Gate 1: Counterparty whitelist
         if (!_counterparties[to].active) {
@@ -123,6 +126,10 @@ contract TreasuryVault is AccessControl {
         }
 
         // Gate 4: ERC-3643 compliance (identity + token-level rules)
+        // Counters are written after the call on purpose: a rejected transfer must not consume a cap.
+        // Re-entry would need AGENT_ROLE, since every state-changing function is role-gated.
+        // The events report the token's result, so they can only follow the call.
+        // forge-lint: disable-start(reentrancy-no-eth, reentrancy-events)
         try IERC3643(token).transfer(to, amount) returns (bool success) {
             if (!success) {
                 emit TransferRejected(token, to, amount, RejectReason.ERC3643Compliance, "");
@@ -134,6 +141,7 @@ contract TreasuryVault is AccessControl {
         } catch (bytes memory reason) {
             emit TransferRejected(token, to, amount, RejectReason.ERC3643Compliance, reason);
         }
+        // forge-lint: disable-end(reentrancy-no-eth, reentrancy-events)
     }
 
     /// @notice Add a counterparty to the whitelist with a per-day transfer cap.

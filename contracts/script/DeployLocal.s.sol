@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.28;
+pragma solidity 0.8.38;
 
 import { Script, console } from "forge-std/Script.sol";
 import { TreasuryVault } from "../src/TreasuryVault.sol";
