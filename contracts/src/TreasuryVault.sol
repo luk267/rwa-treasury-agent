@@ -8,17 +8,18 @@ import { IERC3643 } from "./interfaces/IERC3643.sol";
 
 /// @title TreasuryVault
 /// @notice Treasury vault that holds ERC-3643 tokens and enforces holder-side
-///         compliance policies (pause, counterparty whitelist, per-asset exposure
-///         caps, daily caps per counterparty) before delegating to the token's
-///         own ERC-3643 compliance layer.
-/// @dev Vault pattern: the contract OWNS the tokens and is the single entry
-///      point for transfers. The agent (AGENT_ROLE) can only act through this
-///      contract - no token transfers can bypass these policies. Each role is
+///         policies (counterparty whitelist, daily cap per counterparty, per-asset
+///         exposure cap) before delegating to the token's own ERC-3643 compliance layer.
+/// @dev Vault pattern: the contract OWNS the tokens, so executeTransfer is the only
+///      way for the AI agent (AGENT_ROLE) to move them, and every such transfer
+///      passes these policies. The token issuer is not bound by them: ERC-3643 lets
+///      the issuer's agents force transfers, freeze, pause, recover and burn
+///      directly on the vault's balance. The vault must be registered and verified
+///      in the token's identity registry before it can receive tokens. Each role is
 ///      assigned to its own account at construction. The admin role follows
 ///      OpenZeppelin's AccessControlDefaultAdminRules: a single admin, handed over
-///      in two steps with a delay. Production hardening (multisig admin,
-///      SafeERC20, ONCHAINID) is deliberately out of scope for this reference
-///      implementation.
+///      in two steps with a delay. A multisig admin and SafeERC20 are out of scope
+///      for this reference implementation.
 contract TreasuryVault is AccessControlDefaultAdminRules {
     struct Counterparty {
         bool active;
@@ -108,9 +109,10 @@ contract TreasuryVault is AccessControlDefaultAdminRules {
     }
 
     /// @notice Execute a token transfer through the vault's policy gate.
-    /// @dev Check order: pause → whitelist → daily cap → exposure cap → token.transfer().
-    ///      Rejected transfers emit TransferRejected (no revert) so the agent
-    ///      can read the reason off-chain.
+    /// @dev Check order: role → pause → whitelist → daily cap → exposure cap → token.transfer().
+    ///      A missing role or a paused vault reverts. A policy rejection (gates 1-4)
+    ///      emits TransferRejected and returns without reverting, so it stays in the
+    ///      log with a typed reason. See docs/adr/0001-emit-instead-of-revert.md.
     /// @param token The ERC-3643 token to transfer.
     /// @param to The recipient counterparty.
     /// @param amount The token amount.

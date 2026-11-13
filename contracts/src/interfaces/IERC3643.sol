@@ -2,9 +2,9 @@
 pragma solidity 0.8.38;
 
 /// @title IERC3643
-/// @notice Minimal subset of the ERC-3643 token interface used by the Treasury Vault.
-/// @dev See https://eips.ethereum.org/EIPS/eip-3643. It intentionally includes only
-///      the three functions the vault calls: transfer, transferFrom, balanceOf.
+/// @notice Minimal ERC-20 subset of the ERC-3643 token interface.
+/// @dev See https://eips.ethereum.org/EIPS/eip-3643. The vault calls only `transfer`.
+///      The off-chain agent reads `balanceOf`. `transferFrom` is currently unused.
 
 interface IERC3643 {
     /// @notice Transfer `amount` tokens to `to`.

@@ -124,8 +124,15 @@ on `TransferRejected`, without a trace API or an archive node. A successful
 transfer emits `TransferExecuted` and updates the daily counters in the same
 transaction.
 
-Component responsibilities, the full transfer flow, and the policy gate
-reference are in [`docs/architecture.md`](docs/architecture.md).
+Component responsibilities, the full transfer flow, the issuer's rights and a
+comparison with Safe + Zodiac Roles, MetaMask Advanced Permissions and
+ERC-8226 are in [`docs/architecture.md`](docs/architecture.md). Threats,
+mitigations with their tests, and known limitations are in
+[`docs/threat-model.md`](docs/threat-model.md). Two decisions have their own
+records:
+
+- [ADR-0001: Policy rejections emit an event instead of reverting](docs/adr/0001-emit-instead-of-revert.md)
+- [ADR-0002: Separate roles, a guarded admin, and no upgrade mechanism](docs/adr/0002-admin-rights-and-no-upgradeability.md)
 
 ---
 
@@ -214,7 +221,9 @@ agent/
   src/prompt.ts                 system prompt: simulate-before-execute, reject-reason mapping
 
 docs/
-  architecture.md               component layout, transfer flow, gate reference
+  architecture.md               component layout, transfer flow, gate reference, alternatives
+  threat-model.md               threats, mitigations with tests, known limitations
+  adr/                          architecture decision records
 
 scripts/
   local-dev.sh                  Anvil + deploy + write deployments/local.json
