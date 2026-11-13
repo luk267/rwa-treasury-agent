@@ -24,7 +24,7 @@ The model sees three tools:
 
 | Tool                         | Effect                                                              |
 | ---------------------------- | ------------------------------------------------------------------- |
-| `get_portfolio`              | Read vault holdings via `balanceOf` on each known token.            |
+| `get_portfolio`              | Read balances, token config, caps and today's usage from the chain. |
 | `check_transfer_feasibility` | Two-phase off-chain simulation (no transaction). See below.         |
 | `execute_transfer`           | `writeContract` + receipt parsing. Returns the decoded vault event. |
 
@@ -92,8 +92,9 @@ don't revert) on the off-chain side. Some failures revert, others emit a
 | Failure mode                                       | How it surfaces                |
 | -------------------------------------------------- | ------------------------------ |
 | `VaultPaused`, `AccessControlUnauthorizedAccount`  | Hard revert                    |
-| `NotWhitelisted`, `DailyCapExceeded`               | `TransferRejected` event       |
-| `ExposureCapExceeded`, `ERC3643Compliance`         | `TransferRejected` event       |
+| `AssetNotAllowed`, `NotWhitelisted`                | `TransferRejected` event       |
+| `DailyCapExceeded`, `AssetDailyCapExceeded`        | `TransferRejected` event       |
+| `ERC3643Compliance`                                | `TransferRejected` event       |
 
 The tool runs `simulateContract` first to catch any revert, then
 `simulateCalls` to decode the event log. The model therefore sees the same
@@ -172,11 +173,11 @@ src/
   outcome.ts      decodes TransferRejected detail, maps RejectReason
   outcome.test.ts decoder tests (node:test)
   config.ts       loads deployments/local.json, viem clients, token/counterparty/amount parsing
-  prompt.ts       system prompt: rules, token errors, tokens, counterparties, exposure caps
+  prompt.ts       system prompt: rules, gate order, token errors, token and counterparty names
   abi.ts          vault + ERC-3643 ABI fragments, token errors, RejectReason enum
   tools/
     types.ts                     VaultTool interface, shared input schema, error naming
-    get-portfolio.ts             balanceOf across all known tokens
+    get-portfolio.ts             balances, token config, caps and today's usage, read from the vault
     check-transfer.ts            two-phase simulation
     execute-transfer.ts          writeContract + receipt event decoding
 ```

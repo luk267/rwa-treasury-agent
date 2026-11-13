@@ -23,8 +23,10 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
         token = new MockERC3643();
         token.setVerified(address(vault), true);
         token.setVerified(cp1, true);
-        token.transfer(address(vault), 100_000e18);
-        vault.addCounterparty(cp1, DAILY_CAP);
+        assertTrue(token.transfer(address(vault), 100_000e18));
+        vault.setAssetConfig(address(token), true, type(uint256).max);
+        vault.addCounterparty(cp1);
+        vault.setCounterpartyDailyCap(cp1, address(token), DAILY_CAP);
     }
 
     /// @dev When the ERC-3643 token rejects the transfer (here: the compliance contract says no),

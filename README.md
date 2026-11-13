@@ -5,8 +5,8 @@
 Tokenized securities (real-world assets, RWAs) may only move between verified
 holders. Under ERC-3643 the issuer enforces this inside the token: an identity
 registry, compliance rules, frozen wallets. A treasury that holds such tokens
-adds rules of its own on top: whom it pays, how much per counterparty per day,
-how much of each asset may leave per day.
+adds rules of its own on top: which tokens it moves, whom it pays, how much of
+each token per counterparty per day, how much of each token may leave per day.
 
 This project lets an AI agent run that treasury without trusting it. The agent
 proposes transfers. A Solidity vault applies the treasury's rules, then hands
@@ -51,17 +51,19 @@ Scene 4 from a real run, shortened (`[...]` marks the cuts):
   }
 }
 
-I didn't send the 100 MOCK to cp3. The test run said the transfer would fail,
-so no transaction went out.
+I didn't send the transfer because the dry-run was rejected. **No transfer
+was made.**
 
-Why it was blocked: The MOCK token's own rules stopped it, not the vault's.
-cp3 doesn't have a verified identity in MOCK's identity registry. In other
-words, cp3 hasn't completed the token's KYC check. [...]
+**Why it was rejected:** The MOCK token itself refused it (`ERC3643Compliance`,
+error `UnverifiedIdentity()`). cp3 (`0x976EA74026E726554dB657fA54763abd0C3a0aa9`)
+has no verified identity (KYC) in MOCK's identity registry. [...]
 
-The vault's own checks all passed:
-- cp3 is on the vault's approved recipient list.
-- 100 MOCK is within cp3's daily limit of 1,000.
-- 100 MOCK is within the 8,000 MOCK daily limit for the token.
+**All the vault's own limits passed:**
+- **Token allowed:** Yes. The vault holds 99,500 MOCK.
+- **cp3 approved:** cp3 is an active counterparty.
+- **cp3's daily cap:** 1,000 MOCK, with 0 used today, so 100 fits.
+- **Vault's daily limit for MOCK:** 8,000 MOCK across all recipients, with 500
+  used today, so 7,500 is left.
 [...]
 --- done (turns: 3) ---
 ```
@@ -92,10 +94,10 @@ flowchart LR
     Agent["AI Agent<br/>TypeScript, Claude API + viem"]
     subgraph Vault["TreasuryVault (Solidity, AccessControl)"]
         Auth["role + pause<br/>(revert)"]
-        Gates["① whitelist → ② daily cap →<br/>③ exposure cap"]
+        Gates["① token allowed → ② whitelist →<br/>③ daily cap → ④ token cap"]
         Auth --> Gates
     end
-    Token["ERC-3643 Token<br/>④ identity + compliance"]
+    Token["ERC-3643 Token<br/>⑤ identity + compliance"]
     CP["Counterparty"]
     Log[("Event log<br/>TransferRejected / TransferExecuted")]
 
@@ -110,14 +112,19 @@ The vault follows one rule for refusals:
 
 - **Authorization reverts.** A caller without `AGENT_ROLE`, or any call while
   the vault is paused, reverts. The caller had no right to ask.
-- **Policy decisions are logged.** Four gates run in order. A refusal emits
+- **Policy decisions are logged.** Five gates run in order. A refusal emits
   `TransferRejected(token, to, amount, reason, detail)`, and the transaction
   still succeeds:
-  1. Counterparty whitelist (vault)
-  2. Daily cap per counterparty (vault)
-  3. Daily exposure cap per asset (vault)
-  4. ERC-3643 compliance (token). The vault calls `token.transfer` in
+  1. Token allowlist (vault)
+  2. Counterparty whitelist (vault)
+  3. Daily cap per counterparty and token (vault)
+  4. Daily outflow cap per token, over all counterparties (vault)
+  5. ERC-3643 compliance (token). The vault calls `token.transfer` in
      try/catch and keeps the token's revert data in `detail`.
+
+The vault's gates are default-deny: an unknown token, an unknown recipient or
+a cap that was never set blocks the transfer. "Unlimited" has to be set
+explicitly.
 
 A monitor therefore finds every blocked attempt with one `eth_getLogs` filter
 on `TransferRejected`, without a trace API or an archive node. A successful
@@ -138,7 +145,7 @@ records:
 
 ## Design notes
 
-- **Defense in depth.** Three cheap vault checks run before the more
+- **Defense in depth.** Four cheap vault checks run before the more
   expensive ERC-3643 call. The vault owns the tokens, so the agent has no
   path that skips the gates.
 - **Counters update on success only.** `_dailySpent` and `_assetDailySpent`
@@ -170,9 +177,9 @@ Start the local stack (Anvil + deployed vault + funded mock token):
 ./scripts/local-dev.sh
 ```
 
-The script starts Anvil, deploys `TreasuryVault` and `MockERC3643`,
-whitelists three counterparties, sets an exposure cap, and writes addresses to
-`deployments/local.json`. The token verifies the vault, `cp1` and `cp2`. It
+The script starts Anvil, deploys `TreasuryVault` and `MockERC3643`, allows
+the token with a daily outflow cap, whitelists three counterparties with a
+daily cap each, and writes addresses to `deployments/local.json`. The token verifies the vault, `cp1` and `cp2`. It
 does not verify `cp3`, so a transfer to `cp3` passes the vault's gates and is
 then rejected by the token with `UnverifiedIdentity()`. Anvil runs until you
 press Ctrl+C.
@@ -246,9 +253,9 @@ The suites cover the vault's gates, the role split and the ERC-3643 integration:
 | --------------------------------------- | --------------------------------------------- |
 | `TreasuryVault.Skeleton.t.sol`          | Constructor, roles, pause / unpause           |
 | `TreasuryVault.Roles.t.sol`             | One account per role, two-step admin handover |
-| `TreasuryVault.Whitelist.t.sol`         | Counterparty add / deactivate, whitelist gate |
-| `TreasuryVault.DailyCap.t.sol`          | Per-counterparty daily cap, day-bucket reset  |
-| `TreasuryVault.ExposureCap.t.sol`       | Per-asset daily exposure cap                  |
+| `TreasuryVault.Whitelist.t.sol`         | Counterparty add / re-add / deactivate, whitelist gate |
+| `TreasuryVault.DailyCap.t.sol`          | Daily cap per counterparty and token, overflow, day-bucket reset |
+| `TreasuryVault.AssetCap.t.sol`          | Token allowlist, daily outflow cap per token  |
 | `TreasuryVault.ERC3643Compliance.t.sol` | try/catch on the token's compliance check     |
 | `TreasuryVault.IssuerRights.t.sol`      | Token-side rejections, issuer forced transfer |
 

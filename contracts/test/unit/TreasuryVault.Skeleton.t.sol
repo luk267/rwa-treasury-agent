@@ -28,8 +28,10 @@ contract TreasuryVaultSkeletonTest is Test {
         token = new MockERC3643();
         token.setVerified(address(vault), true);
         token.setVerified(alice, true);
-        token.transfer(address(vault), 100_000e18);
-        vault.addCounterparty(alice, type(uint256).max);
+        assertTrue(token.transfer(address(vault), 100_000e18));
+        vault.setAssetConfig(address(token), true, type(uint256).max);
+        vault.addCounterparty(alice);
+        vault.setCounterpartyDailyCap(alice, address(token), type(uint256).max);
     }
 
     function test_constructor_grantsAllRolesToOneAccount() external view {

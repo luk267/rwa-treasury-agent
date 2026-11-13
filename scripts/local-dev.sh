@@ -57,10 +57,6 @@ MOCK=$(extract mock)
 CP1=$(extract cp1)
 CP2=$(extract cp2)
 CP3=$(extract cp3)
-CP1_CAP_WEI=$(extract cp1DailyCap)
-CP2_CAP_WEI=$(extract cp2DailyCap)
-CP3_CAP_WEI=$(extract cp3DailyCap)
-EXPOSURE_WEI=$(extract mockExposureCap)
 FUNDING_WEI=$(extract vaultFunding)
 ADMIN=$(extract admin)
 TREASURER=$(extract treasurer)
@@ -89,12 +85,9 @@ cat > "$DEPLOYMENTS_DIR/local.json" <<EOF
     { "address": "$MOCK", "symbol": "MOCK", "decimals": 18 }
   ],
   "counterparties": [
-    { "address": "$CP1", "name": "cp1", "dailyCap": "$(to_human "$CP1_CAP_WEI")" },
-    { "address": "$CP2", "name": "cp2", "dailyCap": "$(to_human "$CP2_CAP_WEI")" },
-    { "address": "$CP3", "name": "cp3", "dailyCap": "$(to_human "$CP3_CAP_WEI")" }
-  ],
-  "exposureCaps": [
-    { "token": "$MOCK", "cap": "$(to_human "$EXPOSURE_WEI")" }
+    { "address": "$CP1", "name": "cp1" },
+    { "address": "$CP2", "name": "cp2" },
+    { "address": "$CP3", "name": "cp3" }
   ],
   "vaultFunding": "$(to_human "$FUNDING_WEI")"
 }

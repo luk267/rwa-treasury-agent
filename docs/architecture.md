@@ -30,8 +30,8 @@ The system has three layers, each one untrusted by the layer below.
 | Layer       | Component                | Responsibility                                                                  |
 | ----------- | ------------------------ | ------------------------------------------------------------------------------- |
 | Reasoning   | TypeScript agent         | Decide what transfer to attempt; explain the on-chain outcome in plain language.|
-| Policy      | `TreasuryVault.sol`      | Own the tokens; check role and pause; run gates 1–3; emit a structured outcome. |
-| Compliance  | ERC-3643 (T-REX) token   | Gate 4: recipient identity, freeze, pause and compliance rules at the token.    |
+| Policy      | `TreasuryVault.sol`      | Own the tokens; check role and pause; run gates 1–4; emit a structured outcome. |
+| Compliance  | ERC-3643 (T-REX) token   | Gate 5: recipient identity, freeze, pause and compliance rules at the token.    |
 
 The agent never holds tokens and is not trusted to follow rules. The vault
 holds the tokens and is the only path for the AI agent to move them. The token
@@ -45,11 +45,11 @@ freeze the vault's tokens directly (see [Issuer rights](#issuer-rights)).
 
 | Component                 | Role                                                                                                                       | Lives in                       |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `TreasuryVault.sol`       | Holds ERC-3643 tokens. Runs gates 1–3, then calls the token's `transfer` (gate 4) and surfaces the outcome as an event.   | `contracts/src/`               |
+| `TreasuryVault.sol`       | Holds ERC-3643 tokens. Runs gates 1–4, then calls the token's `transfer` (gate 5) and surfaces the outcome as an event.   | `contracts/src/`               |
 | `IERC3643.sol`            | Minimal ERC-20 subset of ERC-3643. The vault calls only `transfer`; the agent reads `balanceOf`; `transferFrom` is unused. | `contracts/src/interfaces/`    |
 | `MockERC3643.sol`         | Test double modelled on T-REX v5: checks pause, freeze, balance, recipient identity and compliance in that order and reverts with the v5 error names. Its deployer is the issuer agent: verifies wallets, freezes, pauses, forces transfers. | `contracts/test/mocks/`        |
-| TypeScript agent          | Own tool loop over the Claude Messages API with three tools (read holdings, simulate, submit). Asks the operator before a real transfer. System prompt requires simulate before execute and maps `RejectReason` and the decoded token error back to plain language. | `agent/src/` |
-| `DeployLocal.s.sol`       | Foundry script: deploys both contracts, verifies the vault, `cp1` and `cp2` in the token, funds the vault, whitelists three counterparties, sets an exposure cap. | `contracts/script/`            |
+| TypeScript agent          | Own tool loop over the Claude Messages API with three tools (read holdings and limits from the chain, simulate, submit). Asks the operator before a real transfer. System prompt requires simulate before execute and maps `RejectReason` and the decoded token error back to plain language. | `agent/src/` |
+| `DeployLocal.s.sol`       | Foundry script: deploys both contracts, verifies the vault, `cp1` and `cp2` in the token, funds the vault, allows the token with a daily outflow cap, whitelists three counterparties and sets their daily caps for the token. | `contracts/script/`            |
 | `scripts/local-dev.sh`    | Starts Anvil, runs the deploy script, parses output, writes `deployments/local.json`.                                      | `scripts/`                     |
 
 ---
@@ -62,14 +62,14 @@ role-gated capabilities and one admin.
 | Role                 | Granted by  | Capabilities                                                                       |
 | -------------------- | ----------- | ---------------------------------------------------------------------------------- |
 | `DEFAULT_ADMIN_ROLE` | Constructor | Grant and revoke other roles.                                                      |
-| `TREASURER_ROLE`     | Constructor | `addCounterparty`, `deactivateCounterparty`, `setExposureCap`.                     |
+| `TREASURER_ROLE`     | Constructor | `setAssetConfig`, `addCounterparty`, `deactivateCounterparty`, `setCounterpartyDailyCap`. |
 | `AGENT_ROLE`         | Constructor | `executeTransfer` - the only vault function that moves tokens.                     |
 | `PAUSER_ROLE`        | Constructor | `pause`, `unpause`.                                                                |
 
 The constructor takes one address per role. The deployer gets no role unless
 it passes its own address. The agent's key therefore holds `AGENT_ROLE` only:
-it cannot whitelist a counterparty, raise a cap, unpause, or grant itself a
-role. The admin can grant and revoke all roles later.
+it cannot allow a token, whitelist a counterparty, raise a cap, unpause, or
+grant itself a role. The admin can grant and revoke all roles later.
 
 The local stack uses one Anvil account per role:
 
@@ -98,14 +98,17 @@ reverts until `unpause()`. To lock the agent out for good, the admin calls
 ## Transfer flow
 
 `executeTransfer(token, to, amount)` first checks authorization, then runs
-four gates in a fixed order:
+five gates in a fixed order:
 
 - **Authorization reverts.** A caller without `AGENT_ROLE` reverts with
   `AccessControlUnauthorizedAccount`. While the vault is paused, every call
   reverts with `VaultPaused`. The caller had no right to ask.
-- **Policy decisions are logged.** Each of the four gates either rejects the
+- **Policy decisions are logged.** Each of the five gates either rejects the
   transfer (emit `TransferRejected`, return) or lets it through to the next
-  gate. Gates 1–3 are the vault's own rules; gate 4 is the token's.
+  gate. Gates 1–4 are the vault's own rules; gate 5 is the token's. Every
+  vault gate is default-deny: a token must be allowed, a counterparty must be
+  active, and a cap that was never set is 0. "Unlimited" is the explicit
+  value `type(uint256).max`.
 
 ```mermaid
 flowchart TD
@@ -113,33 +116,35 @@ flowchart TD
     Role -->|"no"| RevertRole["revert AccessControlUnauthorizedAccount"]
     Role -->|"yes"| Pause{"paused?"}
     Pause -->|"yes"| Revert["revert VaultPaused"]
-    Pause -->|"no"| WL{"gate 1<br/>counterparty<br/>active?"}
-    WL -->|"no"| RJ1["TransferRejected<br/>(NotWhitelisted)"]
-    WL -->|"yes"| DC{"gate 2<br/>daily cap<br/>(per counterparty)<br/>still has room?"}
-    DC -->|"no"| RJ2["TransferRejected<br/>(DailyCapExceeded)"]
-    DC -->|"yes"| EX{"gate 3<br/>exposure cap<br/>(per asset)<br/>still has room?"}
-    EX -->|"no"| RJ3["TransferRejected<br/>(ExposureCapExceeded)"]
-    EX -->|"yes"| ERC["gate 4<br/>try token.transfer(to, amount)"]
-    ERC -->|"reverts or<br/>returns false"| RJ4["TransferRejected<br/>(ERC3643Compliance, detail)"]
+    Pause -->|"no"| AL{"gate 1<br/>token<br/>allowed?"}
+    AL -->|"no"| RJ1["TransferRejected<br/>(AssetNotAllowed)"]
+    AL -->|"yes"| WL{"gate 2<br/>counterparty<br/>active?"}
+    WL -->|"no"| RJ2["TransferRejected<br/>(NotWhitelisted)"]
+    WL -->|"yes"| DC{"gate 3<br/>daily cap<br/>(per counterparty and token)<br/>still has room?"}
+    DC -->|"no"| RJ3["TransferRejected<br/>(DailyCapExceeded)"]
+    DC -->|"yes"| AC{"gate 4<br/>daily outflow cap<br/>(per token)<br/>still has room?"}
+    AC -->|"no"| RJ4["TransferRejected<br/>(AssetDailyCapExceeded)"]
+    AC -->|"yes"| ERC["gate 5<br/>try token.transfer(to, amount)"]
+    ERC -->|"reverts or<br/>returns false"| RJ5["TransferRejected<br/>(ERC3643Compliance, detail)"]
     ERC -->|"returns true"| OK["update daily counters<br/>emit TransferExecuted"]
 ```
 
 Two design choices are worth flagging:
 
 1. **Policy rejections do not revert.** They emit `TransferRejected` with a
-   typed reason and, for gate 4, the token's revert data. A monitor finds
+   typed reason and, for gate 5, the token's revert data. A monitor finds
    every blocked attempt with one `eth_getLogs` filter, without a trace API
    or an archive node. The agent layer treats `TransferRejected` as a normal
    outcome, not an error. The trade-offs (gas for rejected attempts, a
    "success" status in wallets) are in
    [ADR-0001](adr/0001-emit-instead-of-revert.md).
-2. **Counters update only on success.** `_dailySpent[to][day]` and
+2. **Counters update only on success.** `_dailySpent[to][token][day]` and
    `_assetDailySpent[token][day]` are written *after* `token.transfer`
    returns true. A rejected ERC-3643 call leaves the counters untouched
    (verified by `test_executeTransfer_erc3643Rejects_dailyCapNotConsumed`).
 
 For the source, see
-[`contracts/src/TreasuryVault.sol:122-162`](../contracts/src/TreasuryVault.sol).
+[`contracts/src/TreasuryVault.sol:120-179`](../contracts/src/TreasuryVault.sol).
 
 ---
 
@@ -148,15 +153,23 @@ For the source, see
 | Check | Stored as                                       | Configured by               | Behaviour                                                                                                              |
 | ----- | ----------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Auth  | OpenZeppelin role storage and `bool _paused`    | admin (roles), `pause` / `unpause` | Not a gate. Reverts without `AGENT_ROLE`, and reverts `VaultPaused` while paused. Hard stop for every attempt.  |
-| 1     | `mapping(address => Counterparty) _counterparties` | `addCounterparty` / `deactivateCounterparty` | Recipient must have `active == true`. Deactivation is soft (preserves `addedAt` for audit). Emits `NotWhitelisted`. |
-| 2     | `mapping(address => mapping(uint256 => uint256)) _dailySpent` | `addCounterparty(.., dailyCap)` | Per-counterparty per-day cap. Day bucket is `block.timestamp / 1 days`. Cap of zero means no transfer allowed. Emits `DailyCapExceeded`. |
-| 3     | `mapping(address => uint256) _exposureCaps` and `_assetDailySpent` | `setExposureCap`             | Per-asset per-day outflow cap. `cap == 0` means unlimited. Aggregates across all counterparties for that token. Emits `ExposureCapExceeded`. |
-| 4     | (delegated)                                     | the token contract          | `try token.transfer(to, amount)` - captures revert bytes in `detail`, or rejects on `false` return. Emits `ERC3643Compliance`. |
+| 1     | `mapping(address token => AssetConfig) _assets` | `setAssetConfig(token, allowed, dailyOutflowCap)` | The token must have `allowed == true`. A token that was never configured is not allowed. Emits `AssetNotAllowed`. |
+| 2     | `mapping(address cp => Counterparty) _counterparties` | `addCounterparty` / `deactivateCounterparty` | Recipient must have `active == true`. Deactivation is soft; re-adding keeps the first `addedAt` for audit. Emits `NotWhitelisted`. |
+| 3     | `_counterpartyDailyCaps[cp][token]` and `_dailySpent[cp][token][day]` | `setCounterpartyDailyCap(cp, token, dailyCap)` | Per counterparty, per token, per day. Day bucket is `block.timestamp / 1 days`. A cap that was never set is 0 and blocks the token for this counterparty. Emits `DailyCapExceeded`. |
+| 4     | `AssetConfig.dailyOutflowCap` and `_assetDailySpent[token][day]` | `setAssetConfig`             | Per token, per day, summed over all counterparties. A cap of 0 blocks the token. Emits `AssetDailyCapExceeded`. |
+| 5     | (delegated)                                     | the token contract          | `try token.transfer(to, amount)` - captures revert bytes in `detail`, or rejects on `false` return. Emits `ERC3643Compliance`. |
+
+Gates 3 and 4 compare with `spent > cap || amount > cap - spent`. The check
+cannot overflow, and a cap lowered below what was already spent today rejects
+instead of underflowing. Caps and counters are kept per token, because raw
+amounts of tokens with different decimals cannot be added. `type(uint256).max`
+means unlimited. `getAssetConfig`, `getCounterparty`,
+`getCounterpartyDailyCap`, `spentToday` and `assetSpentToday` expose the
+configuration and today's usage; the agent reads them at run time.
 
 Reject reasons are carried in the `RejectReason` enum on the
 `TransferRejected` event so an off-chain reader can branch on them without
-string parsing. `RejectReason.Paused` exists in the enum but is never
-emitted, because pause reverts.
+string parsing. Pause is not in the enum, because pause reverts.
 
 ---
 
@@ -206,11 +219,11 @@ mock models freeze, pause and forced transfer:
 
 | Issuer action           | Effect on the vault                                                 | Test                                                       |
 | ----------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Freeze the vault        | Gate 4 rejects every transfer with `FrozenWallet(vault)`            | `test_executeTransfer_vaultFrozen_emitsRejectedWithFrozenWallet` |
-| Pause the token         | Gate 4 rejects every transfer with `EnforcedPause()`                | `test_executeTransfer_tokenPaused_emitsRejectedWithEnforcedPause` |
-| Not verify a recipient  | Gate 4 rejects with `UnverifiedIdentity()`                          | `test_executeTransfer_recipientNotVerified_emitsRejectedWithUnverifiedIdentity` |
+| Freeze the vault        | Gate 5 rejects every transfer with `FrozenWallet(vault)`            | `test_executeTransfer_vaultFrozen_emitsRejectedWithFrozenWallet` |
+| Pause the token         | Gate 5 rejects every transfer with `EnforcedPause()`                | `test_executeTransfer_tokenPaused_emitsRejectedWithEnforcedPause` |
+| Not verify a recipient  | Gate 5 rejects with `UnverifiedIdentity()`                          | `test_executeTransfer_recipientNotVerified_emitsRejectedWithUnverifiedIdentity` |
 | Forced transfer         | Moves the vault's tokens; no vault event                            | `test_forcedTransfer_movesVaultTokensWithoutVaultEvent`    |
-| Forced transfer         | Leaves both daily caps untouched                                    | `test_forcedTransfer_doesNotTouchDailyCounters`            |
+| Forced transfer         | Leaves the counterparty cap and the token cap untouched             | `test_forcedTransfer_doesNotTouchDailyCounters`            |
 
 Recovery, mint and burn are not modelled. All tests are in
 [`TreasuryVault.IssuerRights.t.sol`](../contracts/test/unit/TreasuryVault.IssuerRights.t.sol).
@@ -223,7 +236,7 @@ Recovery, mint and burn are not modelled. All tests are in
 | ------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
 | Agent (TypeScript)              | Propose a transfer, simulate it, explain the resulting event.          | Choose recipients, choose amounts, bypass any gate.   |
 | Operator prompt (`Proceed? [y/N]`) | Let a human stop a transfer before it is sent.                      | Act as a security boundary: the agent key can call the vault directly, so the gates must hold on their own. |
-| `TreasuryVault.sol`             | Check role and pause, apply gates 1–3, hand gate 4 to the token. Emit a faithful outcome event. | Decide jurisdiction / KYC / transfer-rule compliance. |
+| `TreasuryVault.sol`             | Check role and pause, apply gates 1–4, hand gate 5 to the token. Emit a faithful outcome event. | Decide jurisdiction / KYC / transfer-rule compliance. |
 | ERC-3643 token                  | Final compliance decision (identity, claims, transfer rules).          | Provide reasoning suitable for off-chain explanation. |
 | Admin / Treasurer / Pauser keys | Hold role management, the configuration authority and the kill-switch. | Nothing beyond that. Assumed honest here; see [ADR-0002](adr/0002-admin-rights-and-no-upgradeability.md) for what a production setup needs. |
 | Token issuer (ERC-3643 agent)   | Verify identities, freeze wallets, pause the token, force transfers. ERC-3643 requires these rights. | Respect the vault's gates: a forced transfer moves the vault's tokens without a vault event and without touching its counters. |
@@ -263,7 +276,7 @@ of this repo. Three established or proposed designs solve similar problems:
 | ---------------------------------- | --------------------------------- | -------------------------------------- | ----------------------------- | ------------------------------------ |
 | Assets held by                     | The vault contract                | The Safe                               | The user's smart account      | The principal                        |
 | Recipient restriction              | Counterparty whitelist            | Conditions on call parameters          | —                             | No                                   |
-| Amount limits                      | Per counterparty per day, per asset per day | Allowances that refill on a schedule | Per period, or streamed  | Per transaction, cumulative per mandate |
+| Amount limits                      | Per counterparty and token per day, per token per day | Allowances that refill on a schedule | Per period, or streamed  | Per transaction, cumulative per mandate |
 | Limit on number of calls           | No                                | Yes (`CallWithinAllowance`)            | —                             | No                                   |
 | Expiry of the agent's rights       | No                                | Planned for Roles v3, not deployed     | Yes                           | Yes (`validUntil`)                   |
 | Delay / veto queue                 | No                                | Yes (Delay Modifier)                   | —                             | No                                   |
@@ -283,7 +296,7 @@ followed after a further audit.
 **What this vault adds:** every refused attempt stays in the event log with a
 typed reason, including the token's own ERC-3643 error, so a monitor finds it
 with `eth_getLogs`. It has two cap dimensions at once (per counterparty and
-per asset). And it keeps the split between the issuer's rules (in the token)
+token, and per token over all counterparties). And it keeps the split between the issuer's rules (in the token)
 and the holder's rules (in the vault) explicit. The cost of the event design
 is in [ADR-0001](adr/0001-emit-instead-of-revert.md).
 

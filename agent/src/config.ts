@@ -39,15 +39,10 @@ export interface Token {
   decimals: number;
 }
 
+/** Name and address only. Status and caps are read from the vault at run time. */
 export interface Counterparty {
   address: `0x${string}`;
   name: string;
-  dailyCap: string;
-}
-
-export interface ExposureCap {
-  token: `0x${string}`;
-  cap: string;
 }
 
 export interface Roles {
@@ -64,7 +59,6 @@ export interface Deployment {
   roles: Roles;
   tokens: Token[];
   counterparties: Counterparty[];
-  exposureCaps: ExposureCap[];
   vaultFunding: string;
 }
 

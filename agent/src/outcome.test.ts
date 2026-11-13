@@ -47,7 +47,7 @@ test("unknown selector gives null and a note", () => {
 });
 
 test("describeRejection omits detail for vault-level gates", () => {
-  assert.deepEqual(describeRejection(4, "0x"), { reason: "DailyCapExceeded" });
+  assert.deepEqual(describeRejection(3, "0x"), { reason: "DailyCapExceeded" });
 });
 
 test("describeRejection decodes detail for the ERC-3643 gate", () => {

@@ -19,7 +19,7 @@ and grants nothing to the deployer:
 | Role                 | Powers                                                    |
 | -------------------- | --------------------------------------------------------- |
 | `DEFAULT_ADMIN_ROLE` | Grant and revoke the other roles.                         |
-| `TREASURER_ROLE`     | Whitelist, daily caps, exposure caps.                     |
+| `TREASURER_ROLE`     | Token allowlist, whitelist, daily caps.                   |
 | `PAUSER_ROLE`        | Pause and unpause.                                        |
 | `AGENT_ROLE`         | `executeTransfer`, nothing else.                          |
 
@@ -39,8 +39,8 @@ a bug, deploy a new vault and migrate:
 
 1. Deploy the new vault with its roles.
 2. The issuer registers the new vault in the token's identity registry.
-3. In the old vault, the treasurer whitelists the new vault with a daily cap
-   (and an exposure cap) that covers the balance.
+3. In the old vault, the treasurer whitelists the new vault and gives it a
+   daily cap per token (and a token cap) that covers the balance.
 4. The `AGENT_ROLE` holder moves the balance with `executeTransfer`.
 5. The admin revokes all roles in the old vault.
 

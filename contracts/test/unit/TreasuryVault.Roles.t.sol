@@ -34,8 +34,11 @@ contract TreasuryVaultRolesTest is Test {
         token.setVerified(cp1, true);
         assertTrue(token.transfer(address(vault), 100_000e18));
 
-        vm.prank(treasurer);
-        vault.addCounterparty(cp1, 1000e18);
+        vm.startPrank(treasurer);
+        vault.setAssetConfig(address(token), true, type(uint256).max);
+        vault.addCounterparty(cp1);
+        vault.setCounterpartyDailyCap(cp1, address(token), 1000e18);
+        vm.stopPrank();
     }
 
     function _expectUnauthorized(address account, bytes32 role) internal {
@@ -91,13 +94,19 @@ contract TreasuryVaultRolesTest is Test {
     function test_agent_cannotAddCounterparty() external {
         _expectUnauthorized(agent, TREASURER_ROLE);
         vm.prank(agent);
-        vault.addCounterparty(makeAddr("attacker"), type(uint256).max);
+        vault.addCounterparty(makeAddr("attacker"));
     }
 
-    function test_agent_cannotSetExposureCap() external {
+    function test_agent_cannotSetAssetConfig() external {
         _expectUnauthorized(agent, TREASURER_ROLE);
         vm.prank(agent);
-        vault.setExposureCap(address(token), 0);
+        vault.setAssetConfig(makeAddr("fake-token"), true, type(uint256).max);
+    }
+
+    function test_agent_cannotSetCounterpartyDailyCap() external {
+        _expectUnauthorized(agent, TREASURER_ROLE);
+        vm.prank(agent);
+        vault.setCounterpartyDailyCap(cp1, address(token), type(uint256).max);
     }
 
     function test_agent_cannotPause() external {

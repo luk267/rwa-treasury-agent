@@ -8,31 +8,38 @@ import { IERC3643 } from "./interfaces/IERC3643.sol";
 
 /// @title TreasuryVault
 /// @notice Treasury vault that holds ERC-3643 tokens and enforces holder-side
-///         policies (counterparty whitelist, daily cap per counterparty, per-asset
-///         exposure cap) before delegating to the token's own ERC-3643 compliance layer.
+///         policies (token allowlist, counterparty whitelist, daily cap per
+///         counterparty and token, daily outflow cap per token) before delegating
+///         to the token's own ERC-3643 compliance layer.
 /// @dev Vault pattern: the contract OWNS the tokens, so executeTransfer is the only
 ///      way for the AI agent (AGENT_ROLE) to move them, and every such transfer
-///      passes these policies. The token issuer is not bound by them: ERC-3643 lets
-///      the issuer's agents force transfers, freeze, pause, recover and burn
-///      directly on the vault's balance. The vault must be registered and verified
-///      in the token's identity registry before it can receive tokens. Each role is
-///      assigned to its own account at construction. The admin role follows
-///      OpenZeppelin's AccessControlDefaultAdminRules: a single admin, handed over
-///      in two steps with a delay. A multisig admin and SafeERC20 are out of scope
-///      for this reference implementation.
+///      passes these policies. Every policy is default-deny: a token must be allowed,
+///      a counterparty must be active, and a cap that was never set is zero.
+///      "Unlimited" is the explicit value type(uint256).max. The token issuer is not
+///      bound by these policies: ERC-3643 lets the issuer's agents force transfers,
+///      freeze, pause, recover and burn directly on the vault's balance. The vault
+///      must be registered and verified in the token's identity registry before it
+///      can receive tokens. Each role is assigned to its own account at construction.
+///      The admin role follows OpenZeppelin's AccessControlDefaultAdminRules: a single
+///      admin, handed over in two steps with a delay. A multisig admin and SafeERC20
+///      are out of scope for this reference implementation.
 contract TreasuryVault is AccessControlDefaultAdminRules {
+    struct AssetConfig {
+        bool allowed;
+        uint256 dailyOutflowCap;
+    }
+
     struct Counterparty {
         bool active;
-        uint256 dailyCap;
         uint256 addedAt;
     }
 
     enum RejectReason {
         None,
-        Paused,
+        AssetNotAllowed,
         NotWhitelisted,
-        ExposureCapExceeded,
         DailyCapExceeded,
+        AssetDailyCapExceeded,
         ERC3643Compliance
     }
 
@@ -41,20 +48,22 @@ contract TreasuryVault is AccessControlDefaultAdminRules {
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
     bool private _paused;
-    mapping(address => Counterparty) private _counterparties;
-    mapping(address => mapping(uint256 => uint256)) private _dailySpent;
-    mapping(address => uint256) private _exposureCaps;
-    mapping(address => mapping(uint256 => uint256)) private _assetDailySpent;
+    mapping(address token => AssetConfig) private _assets;
+    mapping(address cp => Counterparty) private _counterparties;
+    mapping(address cp => mapping(address token => uint256)) private _counterpartyDailyCaps;
+    mapping(address cp => mapping(address token => mapping(uint256 day => uint256))) private _dailySpent;
+    mapping(address token => mapping(uint256 day => uint256)) private _assetDailySpent;
 
     event Paused(address indexed by);
     event Unpaused(address indexed by);
     event TransferExecuted(address indexed token, address indexed to, uint256 amount, address indexed by);
-    event CounterpartyAdded(address indexed counterparty, uint256 dailyCap);
+    event AssetConfigSet(address indexed token, bool allowed, uint256 dailyOutflowCap);
+    event CounterpartyAdded(address indexed counterparty);
     event CounterpartyDeactivated(address indexed counterparty);
+    event CounterpartyDailyCapSet(address indexed counterparty, address indexed token, uint256 dailyCap);
     event TransferRejected(
         address indexed token, address indexed to, uint256 amount, RejectReason reason, bytes detail
     );
-    event ExposureCapSet(address indexed asset, uint256 cap);
 
     error VaultPaused();
     error InvalidCounterparty();
@@ -68,7 +77,7 @@ contract TreasuryVault is AccessControlDefaultAdminRules {
     ///      The other three roles revert with ZeroAddress. Emits RoleGranted per role.
     /// @param adminTransferDelay Seconds a new admin must wait before accepting the handover.
     /// @param admin Holder of DEFAULT_ADMIN_ROLE: grants and revokes the other roles.
-    /// @param treasurer Holder of TREASURER_ROLE: manages counterparties and exposure caps.
+    /// @param treasurer Holder of TREASURER_ROLE: manages the token allowlist, counterparties and caps.
     /// @param agent Holder of AGENT_ROLE: the only account that can call executeTransfer.
     /// @param pauser Holder of PAUSER_ROLE: can pause and unpause the vault.
     constructor(uint48 adminTransferDelay, address admin, address treasurer, address agent, address pauser)
@@ -109,50 +118,58 @@ contract TreasuryVault is AccessControlDefaultAdminRules {
     }
 
     /// @notice Execute a token transfer through the vault's policy gate.
-    /// @dev Check order: role → pause → whitelist → daily cap → exposure cap → token.transfer().
-    ///      A missing role or a paused vault reverts. A policy rejection (gates 1-4)
-    ///      emits TransferRejected and returns without reverting, so it stays in the
-    ///      log with a typed reason. See docs/adr/0001-emit-instead-of-revert.md.
+    /// @dev Check order: role → pause → token allowed → counterparty active →
+    ///      daily cap per counterparty and token → daily outflow cap per token →
+    ///      token.transfer(). A missing role or a paused vault reverts. A policy
+    ///      rejection (gates 1-5) emits TransferRejected and returns without reverting,
+    ///      so it stays in the log with a typed reason.
+    ///      See docs/adr/0001-emit-instead-of-revert.md.
     /// @param token The ERC-3643 token to transfer.
     /// @param to The recipient counterparty.
     /// @param amount The token amount.
-    // `token` is only written after a successful transfer. A call to an address without code
-    // fails to decode its empty return data and reverts, so the zero address never gets there.
+    // `token` must be allowed by the treasurer (gate 1) before anything is written for it.
     // forge-lint: disable-next-line(missing-zero-check)
     function executeTransfer(address token, address to, uint256 amount) external onlyRole(AGENT_ROLE) whenNotPaused {
-        // Gate 1: Counterparty whitelist
+        // Gate 1: Token allowlist
+        AssetConfig memory asset = _assets[token];
+        if (!asset.allowed) {
+            emit TransferRejected(token, to, amount, RejectReason.AssetNotAllowed, "");
+            return;
+        }
+
+        // Gate 2: Counterparty whitelist
         if (!_counterparties[to].active) {
             emit TransferRejected(token, to, amount, RejectReason.NotWhitelisted, "");
             return;
         }
 
-        // Gate 2: Daily cap per counterparty
+        // Gate 3: Daily cap per counterparty and token
         uint256 dayBucket = block.timestamp / 1 days;
-        uint256 spent = _dailySpent[to][dayBucket];
-        if (spent + amount > _counterparties[to].dailyCap) {
+        uint256 spent = _dailySpent[to][token][dayBucket];
+        if (_exceedsCap(spent, amount, _counterpartyDailyCaps[to][token])) {
             emit TransferRejected(token, to, amount, RejectReason.DailyCapExceeded, "");
             return;
         }
 
-        // Gate 3: Per-asset exposure cap (0 = no limit)
-        uint256 assetCap = _exposureCaps[token];
+        // Gate 4: Daily outflow cap per token, summed over all counterparties
         uint256 assetSpent = _assetDailySpent[token][dayBucket];
-        if (assetCap > 0 && assetSpent + amount > assetCap) {
-            emit TransferRejected(token, to, amount, RejectReason.ExposureCapExceeded, "");
+        if (_exceedsCap(assetSpent, amount, asset.dailyOutflowCap)) {
+            emit TransferRejected(token, to, amount, RejectReason.AssetDailyCapExceeded, "");
             return;
         }
 
-        // Gate 4: ERC-3643 compliance (identity + token-level rules)
+        // Gate 5: ERC-3643 compliance (identity + token-level rules)
         // Counters are written after the call on purpose: a rejected transfer must not consume a cap.
         // Re-entry would need AGENT_ROLE, since every state-changing function is role-gated.
         // The events report the token's result, so they can only follow the call.
+        // Gates 3 and 4 guarantee spent + amount <= cap, so the additions below cannot overflow.
         // forge-lint: disable-start(reentrancy-no-eth, reentrancy-events)
         try IERC3643(token).transfer(to, amount) returns (bool success) {
             if (!success) {
                 emit TransferRejected(token, to, amount, RejectReason.ERC3643Compliance, "");
                 return;
             }
-            _dailySpent[to][dayBucket] = spent + amount;
+            _dailySpent[to][token][dayBucket] = spent + amount;
             _assetDailySpent[token][dayBucket] = assetSpent + amount;
             emit TransferExecuted(token, to, amount, msg.sender);
         } catch (bytes memory reason) {
@@ -161,16 +178,38 @@ contract TreasuryVault is AccessControlDefaultAdminRules {
         // forge-lint: disable-end(reentrancy-no-eth, reentrancy-events)
     }
 
-    /// @notice Add a counterparty to the whitelist with a per-day transfer cap.
-    /// @dev Reverts on zero address or if the counterparty is already active.
-    ///      Emits CounterpartyAdded.
+    /// @notice Allow or block a token and set its daily outflow cap.
+    /// @dev Only TREASURER_ROLE. A token that was never configured is not allowed.
+    ///      The cap counts all counterparties together; 0 blocks every transfer,
+    ///      type(uint256).max means unlimited. Emits AssetConfigSet.
+    /// @param token The token address.
+    /// @param allowed Whether executeTransfer may move this token at all.
+    /// @param dailyOutflowCap The maximum total amount of this token per day bucket.
+    function setAssetConfig(address token, bool allowed, uint256 dailyOutflowCap) external onlyRole(TREASURER_ROLE) {
+        _assets[token] = AssetConfig({ allowed: allowed, dailyOutflowCap: dailyOutflowCap });
+        emit AssetConfigSet(token, allowed, dailyOutflowCap);
+    }
+
+    /// @notice Read a token's configuration.
+    /// @param token The token address to query.
+    /// @return The AssetConfig (not allowed, cap 0 if never set).
+    function getAssetConfig(address token) external view returns (AssetConfig memory) {
+        return _assets[token];
+    }
+
+    /// @notice Add a counterparty to the whitelist, or reactivate a deactivated one.
+    /// @dev Reverts on zero address or if the counterparty is already active. addedAt is
+    ///      set only the first time, so the audit trail keeps the original date. Caps are
+    ///      set per token with setCounterpartyDailyCap; caps set earlier apply again on
+    ///      reactivation. Emits CounterpartyAdded.
     /// @param cp The counterparty address to whitelist.
-    /// @param dailyCap The maximum amount transferable to this counterparty per day bucket.
-    function addCounterparty(address cp, uint256 dailyCap) external onlyRole(TREASURER_ROLE) {
+    function addCounterparty(address cp) external onlyRole(TREASURER_ROLE) {
         if (cp == address(0)) revert InvalidCounterparty();
-        if (_counterparties[cp].active) revert CounterpartyAlreadyActive();
-        _counterparties[cp] = Counterparty({ active: true, dailyCap: dailyCap, addedAt: block.timestamp });
-        emit CounterpartyAdded(cp, dailyCap);
+        Counterparty storage record = _counterparties[cp];
+        if (record.active) revert CounterpartyAlreadyActive();
+        record.active = true;
+        if (record.addedAt == 0) record.addedAt = block.timestamp;
+        emit CounterpartyAdded(cp);
     }
 
     /// @notice Deactivate a counterparty. Preserves addedAt for audit trail.
@@ -183,26 +222,52 @@ contract TreasuryVault is AccessControlDefaultAdminRules {
         emit CounterpartyDeactivated(cp);
     }
 
-    /// @notice Read the full counterparty record (active flag, dailyCap, addedAt).
+    /// @notice Read the counterparty record (active flag, addedAt).
     /// @param cp The counterparty address to query.
     /// @return The full Counterparty struct (zero-valued if never added).
     function getCounterparty(address cp) external view returns (Counterparty memory) {
         return _counterparties[cp];
     }
 
-    /// @notice Set the daily outflow limit for a specific asset.
-    /// @dev 0 = no limit. Only TREASURER_ROLE can call. Emits ExposureCapSet.
-    /// @param asset The token address to cap.
-    /// @param cap The maximum total amount transferable per day (0 = unlimited).
-    function setExposureCap(address asset, uint256 cap) external onlyRole(TREASURER_ROLE) {
-        _exposureCaps[asset] = cap;
-        emit ExposureCapSet(asset, cap);
+    /// @notice Set how much of one token a counterparty may receive per day.
+    /// @dev Only TREASURER_ROLE. Each token has its own cap and counter, because raw amounts
+    ///      of tokens with different decimals cannot be added. 0 (the default) blocks the
+    ///      token for this counterparty, type(uint256).max means unlimited.
+    ///      Emits CounterpartyDailyCapSet.
+    /// @param cp The counterparty address.
+    /// @param token The token address.
+    /// @param dailyCap The maximum amount of `token` transferable to `cp` per day bucket.
+    function setCounterpartyDailyCap(address cp, address token, uint256 dailyCap) external onlyRole(TREASURER_ROLE) {
+        _counterpartyDailyCaps[cp][token] = dailyCap;
+        emit CounterpartyDailyCapSet(cp, token, dailyCap);
     }
 
-    /// @notice Read the exposure cap for an asset.
-    /// @param asset The token address to query.
-    /// @return The daily outflow cap (0 = no limit).
-    function getExposureCap(address asset) external view returns (uint256) {
-        return _exposureCaps[asset];
+    /// @notice Read a counterparty's daily cap for one token.
+    /// @param cp The counterparty address.
+    /// @param token The token address.
+    /// @return The daily cap (0 if never set).
+    function getCounterpartyDailyCap(address cp, address token) external view returns (uint256) {
+        return _counterpartyDailyCaps[cp][token];
+    }
+
+    /// @notice How much of `token` went to `cp` in the current day bucket.
+    /// @param cp The counterparty address.
+    /// @param token The token address.
+    /// @return The amount transferred today (UTC day bucket).
+    function spentToday(address cp, address token) external view returns (uint256) {
+        return _dailySpent[cp][token][block.timestamp / 1 days];
+    }
+
+    /// @notice How much of `token` left the vault in the current day bucket, over all counterparties.
+    /// @param token The token address.
+    /// @return The amount transferred today (UTC day bucket).
+    function assetSpentToday(address token) external view returns (uint256) {
+        return _assetDailySpent[token][block.timestamp / 1 days];
+    }
+
+    /// @dev True if `amount` does not fit into what is left of `cap`. Written so that it cannot
+    ///      overflow, and so that a cap lowered below `spent` rejects instead of underflowing.
+    function _exceedsCap(uint256 spent, uint256 amount, uint256 cap) private pure returns (bool) {
+        return spent > cap || amount > cap - spent;
     }
 }

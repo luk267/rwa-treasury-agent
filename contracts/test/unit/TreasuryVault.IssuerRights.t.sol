@@ -38,9 +38,13 @@ contract TreasuryVaultIssuerRightsTest is Test {
         assertTrue(token.transfer(address(vault), FUNDING));
         vm.stopPrank();
 
-        // The vault whitelists both. Its own policy does not know about the token's identity registry.
-        vault.addCounterparty(cp1, DAILY_CAP);
-        vault.addCounterparty(cp3, DAILY_CAP);
+        // The vault allows the token and whitelists both counterparties.
+        // Its own policy does not know about the token's identity registry.
+        vault.setAssetConfig(address(token), true, type(uint256).max);
+        vault.addCounterparty(cp1);
+        vault.addCounterparty(cp3);
+        vault.setCounterpartyDailyCap(cp1, address(token), DAILY_CAP);
+        vault.setCounterpartyDailyCap(cp3, address(token), DAILY_CAP);
     }
 
     function _expectTokenRejection(address to, uint256 amount, bytes memory detail) internal {
@@ -91,7 +95,8 @@ contract TreasuryVaultIssuerRightsTest is Test {
     function test_executeTransfer_insufficientBalance_emitsRejected() external {
         // A counterparty without a cap, so the vault's own gates let the oversized amount through.
         address whale = makeAddr("whale");
-        vault.addCounterparty(whale, type(uint256).max);
+        vault.addCounterparty(whale);
+        vault.setCounterpartyDailyCap(whale, address(token), type(uint256).max);
         vm.prank(issuer);
         token.setVerified(whale, true);
 
@@ -129,9 +134,9 @@ contract TreasuryVaultIssuerRightsTest is Test {
         assertFalse(vault.getCounterparty(recipient).active, "recipient is not a vault counterparty");
     }
 
-    /// @dev Daily cap and exposure cap count only what goes through executeTransfer.
+    /// @dev The counterparty cap and the asset cap count only what goes through executeTransfer.
     function test_forcedTransfer_doesNotTouchDailyCounters() external {
-        vault.setExposureCap(address(token), DAILY_CAP);
+        vault.setAssetConfig(address(token), true, DAILY_CAP);
 
         vm.prank(issuer);
         token.forcedTransfer(address(vault), cp1, DAILY_CAP);

@@ -8,8 +8,9 @@
 `executeTransfer` can refuse a transfer for two kinds of reasons:
 
 - **Authorization:** the caller has no `AGENT_ROLE`, or the vault is paused.
-- **Policy:** the recipient is not whitelisted, a daily cap or the exposure
-  cap has no room, or the ERC-3643 token rejects the transfer.
+- **Policy:** the token is not allowed, the recipient is not whitelisted, the
+  counterparty's or the token's daily cap has no room, or the ERC-3643 token
+  rejects the transfer.
 
 The usual answer in Solidity is to revert in every case. Comparable designs do
 that: Zodiac Roles reverts with `ConditionViolation`, and the reference token
@@ -24,9 +25,9 @@ decodes custom errors with viem at no extra cost.
 One rule, two channels:
 
 - **Authorization reverts.** A caller without the right to ask gets a revert.
-- **Policy decisions are logged.** Each of the four gates either passes or
+- **Policy decisions are logged.** Each of the five gates either passes or
   emits `TransferRejected(token, to, amount, reason, detail)` and returns
-  normally. `reason` is a typed `RejectReason`. For gate 4, `detail` holds the
+  normally. `reason` is a typed `RejectReason`. For gate 5, `detail` holds the
   token's revert data, for example `UnverifiedIdentity()`.
 
 The reason for this is the audit trail. A reverted transaction is still on

@@ -14,6 +14,65 @@ export const VAULT_ABI = [
     outputs: [],
   },
   {
+    type: "function",
+    name: "getAssetConfig",
+    stateMutability: "view",
+    inputs: [{ name: "token", type: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "allowed", type: "bool" },
+          { name: "dailyOutflowCap", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  {
+    type: "function",
+    name: "assetSpentToday",
+    stateMutability: "view",
+    inputs: [{ name: "token", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "getCounterparty",
+    stateMutability: "view",
+    inputs: [{ name: "cp", type: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "active", type: "bool" },
+          { name: "addedAt", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  {
+    type: "function",
+    name: "getCounterpartyDailyCap",
+    stateMutability: "view",
+    inputs: [
+      { name: "cp", type: "address" },
+      { name: "token", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "spentToday",
+    stateMutability: "view",
+    inputs: [
+      { name: "cp", type: "address" },
+      { name: "token", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
     type: "event",
     name: "TransferExecuted",
     inputs: [
@@ -86,10 +145,10 @@ export const TOKEN_ERRORS_ABI = [
 // in the TransferRejected event.
 export const REJECT_REASON = [
   "None",
-  "Paused",
+  "AssetNotAllowed",
   "NotWhitelisted",
-  "ExposureCapExceeded",
   "DailyCapExceeded",
+  "AssetDailyCapExceeded",
   "ERC3643Compliance",
 ] as const;
 

@@ -18,7 +18,7 @@ contract TreasuryVaultWhitelistTest is Test {
     TreasuryVault vault;
     MockERC3643 token;
 
-    event CounterpartyAdded(address indexed counterparty, uint256 dailyCap);
+    event CounterpartyAdded(address indexed counterparty);
     event CounterpartyDeactivated(address indexed counterparty);
     event TransferRejected(
         address indexed token, address indexed to, uint256 amount, TreasuryVault.RejectReason reason, bytes detail
@@ -28,18 +28,19 @@ contract TreasuryVaultWhitelistTest is Test {
         vault = new TreasuryVault(1 days, address(this), address(this), address(this), address(this));
         token = new MockERC3643();
         token.setVerified(address(vault), true);
-        token.transfer(address(vault), 100_000e18);
-        vault.addCounterparty(alice, type(uint256).max);
+        assertTrue(token.transfer(address(vault), 100_000e18));
+        vault.setAssetConfig(address(token), true, type(uint256).max);
+        vault.addCounterparty(alice);
+        vault.setCounterpartyDailyCap(alice, address(token), type(uint256).max);
     }
 
     function test_addCounterparty_byTreasurer_emitsAndStoresActive() external {
         vm.expectEmit();
-        emit CounterpartyAdded(cp1, DAILY_CAP);
-        vault.addCounterparty(cp1, DAILY_CAP);
+        emit CounterpartyAdded(cp1);
+        vault.addCounterparty(cp1);
 
         TreasuryVault.Counterparty memory cp = vault.getCounterparty(cp1);
         assertTrue(cp.active, "should be active");
-        assertEq(cp.dailyCap, DAILY_CAP, "dailyCap mismatch");
         assertGt(cp.addedAt, 0, "addedAt not set");
     }
 
@@ -48,22 +49,41 @@ contract TreasuryVaultWhitelistTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, TREASURER_ROLE)
         );
-        vault.addCounterparty(cp1, DAILY_CAP);
+        vault.addCounterparty(cp1);
     }
 
     function test_addCounterparty_zeroAddress_reverts() external {
         vm.expectRevert(TreasuryVault.InvalidCounterparty.selector);
-        vault.addCounterparty(address(0), DAILY_CAP);
+        vault.addCounterparty(address(0));
     }
 
     function test_addCounterparty_alreadyActive_reverts() external {
-        vault.addCounterparty(cp1, DAILY_CAP);
+        vault.addCounterparty(cp1);
         vm.expectRevert(TreasuryVault.CounterpartyAlreadyActive.selector);
-        vault.addCounterparty(cp1, DAILY_CAP);
+        vault.addCounterparty(cp1);
+    }
+
+    /// @dev Re-adding a deactivated counterparty reactivates it but keeps the first addedAt,
+    ///      so the audit trail still shows when it was first approved.
+    function test_addCounterparty_readd_keepsAddedAt() external {
+        vault.addCounterparty(cp1);
+        uint256 firstAddedAt = vault.getCounterparty(cp1).addedAt;
+
+        vm.warp(vm.getBlockTimestamp() + 10 days);
+        vault.deactivateCounterparty(cp1);
+        vm.warp(vm.getBlockTimestamp() + 10 days);
+
+        vm.expectEmit(address(vault));
+        emit CounterpartyAdded(cp1);
+        vault.addCounterparty(cp1);
+
+        TreasuryVault.Counterparty memory cp = vault.getCounterparty(cp1);
+        assertTrue(cp.active, "should be active again");
+        assertEq(cp.addedAt, firstAddedAt, "re-adding overwrote addedAt");
     }
 
     function test_deactivateCounterparty_setsInactive_emitsEvent() external {
-        vault.addCounterparty(cp1, DAILY_CAP);
+        vault.addCounterparty(cp1);
         vm.expectEmit();
         emit CounterpartyDeactivated(cp1);
         vault.deactivateCounterparty(cp1);
@@ -72,12 +92,13 @@ contract TreasuryVaultWhitelistTest is Test {
     }
 
     function test_deactivateCounterparty_keepsAddedAt() external {
-        vault.addCounterparty(cp1, DAILY_CAP);
+        vault.addCounterparty(cp1);
+        vault.setCounterpartyDailyCap(cp1, address(token), DAILY_CAP);
         uint256 originalAddedAt = vault.getCounterparty(cp1).addedAt;
         vault.deactivateCounterparty(cp1);
         TreasuryVault.Counterparty memory cp = vault.getCounterparty(cp1);
         assertEq(cp.addedAt, originalAddedAt, "addedAt must persist for audit trail");
-        assertEq(cp.dailyCap, DAILY_CAP, "dailyCap should persist too");
+        assertEq(vault.getCounterpartyDailyCap(cp1, address(token)), DAILY_CAP, "dailyCap should persist too");
     }
 
     /// @dev KEY TEST: vault must NOT revert on rejected transfer.
@@ -89,7 +110,8 @@ contract TreasuryVaultWhitelistTest is Test {
     }
 
     function test_executeTransfer_toDeactivatedCounterparty_emitsRejected() external {
-        vault.addCounterparty(cp1, DAILY_CAP);
+        vault.addCounterparty(cp1);
+        vault.setCounterpartyDailyCap(cp1, address(token), DAILY_CAP);
         vault.deactivateCounterparty(cp1);
         vm.expectEmit();
         emit TransferRejected(address(token), cp1, 100, TreasuryVault.RejectReason.NotWhitelisted, "");
