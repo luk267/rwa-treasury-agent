@@ -165,7 +165,7 @@ Copy `../.env.example` to `.env`. The agent reads three variables:
 
 The agent only runs against the local Anvil stack.
 [`src/config.ts`](src/config.ts) hardcodes Anvil account #5 and the `foundry`
-chain. The agent does not read `RPC_URL_SEPOLIA` or `PRIVATE_KEY`. Account #5
+chain. It takes no RPC URL and no private key from the environment. Account #5
 holds `AGENT_ROLE` and no other role. At startup the agent checks that its key
 matches `roles.agent` in `deployments/local.json` and exits with an error
 otherwise.
