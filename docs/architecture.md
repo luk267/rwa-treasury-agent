@@ -87,7 +87,10 @@ is blocked. A handover takes two steps: the admin calls
 `beginDefaultAdminTransfer(newAdmin)`, and the new admin calls
 `acceptDefaultAdminTransfer()` once the delay has passed (one day in the local
 stack). A typo in the address or a stolen admin key cannot move the role in a
-single transaction, and the current admin can cancel during the delay.
+single transaction, and the current admin can cancel during the delay. The
+delay covers the handover only. The admin can still grant the other three
+roles at once, so the admin key stays the root of trust (row 17 in the
+[threat model](threat-model.md#threats-and-mitigations)).
 
 **Stopping the agent.** The pauser calls `pause()`: every `executeTransfer`
 reverts until `unpause()`. To lock the agent out for good, the admin calls

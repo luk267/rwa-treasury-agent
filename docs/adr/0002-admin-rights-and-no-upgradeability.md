@@ -46,8 +46,14 @@ a bug, deploy a new vault and migrate:
 
 ## Consequences
 
-- No single key can both change the policy and use it. A stolen agent key
-  cannot whitelist, raise a cap, unpause or grant a role.
+- No operating key (treasurer, pauser, agent) can both change the policy and
+  use it. A stolen agent key cannot whitelist, raise a cap, unpause or grant a
+  role.
+- The admin key is the exception and the root of trust. It can grant itself
+  the treasurer and the agent role at once: the handover delay protects only
+  the admin role itself, not `grantRole` for the others (row 17 in the
+  [threat model](../threat-model.md#threats-and-mitigations)). This is why a
+  production setup needs the multisig and the timelock named above.
 - The code that reviewers read is the code that runs. There is no proxy
   admin that could swap the gates, and no storage-layout risk.
 - A bug fix costs a migration, and the migration itself passes the gates.
