@@ -2,6 +2,7 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   decodeEventLog,
+  isAddressEqual,
   type Account,
   type Chain,
   type PublicClient,
@@ -26,8 +27,8 @@ import {
 
 export function createExecuteTransferTool(
   deployment: Deployment,
-  publicClient: PublicClient,
-  walletClient: WalletClient<Transport, Chain, Account>,
+  publicClient: Pick<PublicClient, "waitForTransactionReceipt">,
+  walletClient: Pick<WalletClient<Transport, Chain, Account>, "writeContract">,
 ): VaultTool<TransferInput> {
   return {
     definition: {
@@ -86,7 +87,9 @@ export function createExecuteTransferTool(
         }
 
         // The receipt has no return value, so the outcome comes from the vault's event.
+        // Only the vault's own logs count: a token could emit a look-alike event.
         for (const log of receipt.logs) {
+          if (!isAddressEqual(log.address, deployment.vault)) continue;
           let decoded;
           try {
             decoded = decodeEventLog({
@@ -95,7 +98,7 @@ export function createExecuteTransferTool(
               data: log.data,
             });
           } catch {
-            continue; // foreign event (e.g. inner ERC-20 Transfer)
+            continue; // a vault event the ABI above does not list
           }
           if (decoded.eventName === "TransferExecuted") {
             return {
@@ -107,14 +110,10 @@ export function createExecuteTransferTool(
             };
           }
           if (decoded.eventName === "TransferRejected") {
-            const args = decoded.args as {
-              reason: number;
-              detail: `0x${string}`;
-            };
             return {
               success: false,
               txHash,
-              ...describeRejection(Number(args.reason), args.detail),
+              ...describeRejection(decoded.args.reason, decoded.args.detail),
             };
           }
         }

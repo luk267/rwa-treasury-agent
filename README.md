@@ -303,7 +303,9 @@ The suites cover the vault's gates, the role split and the ERC-3643 integration:
 | `TreasuryVault.IssuerRights.t.sol`      | Token-side rejections, issuer forced transfer |
 | `TreasuryVault.ExecutionPath.t.sol`     | Zero amount, token without a reason, out-of-gas, re-entrancy |
 
-The agent's decoder tests run with `cd agent && npm test`.
+The agent's tests run with `cd agent && npm test`, without network or API
+calls: the tool loop against a fake client, input and deployment parsing,
+error naming, receipt decoding and the decoder for the token's revert data.
 
 ---
 

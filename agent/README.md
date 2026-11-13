@@ -34,7 +34,9 @@ call `get_portfolio` first, then `check_transfer_feasibility` before any
 enum back to a human-readable cause.
 
 Bad tool arguments come back as `UnknownToken`, `UnknownCounterparty` or
-`InvalidAmount`. Any other failure in a tool is reported as `RpcError`.
+`InvalidAmount`. An amount finer than the token's decimals is
+`InvalidAmount`, not rounded. Any other failure in a tool is reported as
+`RpcError`.
 
 ### Agent loop
 
@@ -134,7 +136,7 @@ Then, in `agent/`:
 cp ../.env.example .env                    # then set ANTHROPIC_API_KEY
 npm install
 npm run typecheck                          # tsc --noEmit
-npm test                                   # decoder tests (node:test)
+npm test                                   # unit tests (node:test), no network
 npm start "show the vault holdings"
 npm start "transfer 500 MOCK to cp1"       # asks before sending
 npm start -- --yes "try to transfer 10000 MOCK to cp1"   # hits the daily cap
@@ -150,11 +152,11 @@ the run.
 
 ### Exit codes
 
-| Code | Meaning                                                              |
-| ---- | -------------------------------------------------------------------- |
-| 0    | The agent finished (a rejected or declined transfer is still 0).     |
-| 1    | Bad input or configuration: no prompt, no API key, no deployment.    |
-| 2    | Anthropic API or RPC failure, or the model stopped unexpectedly.     |
+| Code | Meaning                                                                      |
+| ---- | ---------------------------------------------------------------------------- |
+| 0    | The agent finished (a rejected or declined transfer is still 0).             |
+| 1    | Bad input or configuration: no prompt, no API key, no or invalid deployment. |
+| 2    | Anthropic API or RPC failure, or the model stopped unexpectedly.             |
 
 Errors go to stderr as one line, without a stack trace. The agent checks the
 API key and the RPC before its first API call, so a stopped Anvil costs no
@@ -183,14 +185,17 @@ otherwise.
 src/
   index.ts        entry point: env, deployment, pre-flight checks, operator prompt, exit codes
   loop.ts         tool loop over the Messages API
+  loop.test.ts    loop against a fake client: stop reasons, turn limit, approval, input errors
   outcome.ts      decodes TransferRejected detail, maps RejectReason
-  outcome.test.ts decoder tests (node:test)
-  config.ts       loads deployments/local.json, viem clients, token/counterparty/amount parsing
+  outcome.test.ts decoder tests
+  config.ts       validates deployments/local.json (zod), viem clients, token/counterparty/amount parsing
+  config.test.ts  names, addresses, amounts, broken deployment files
   prompt.ts       system prompt: rules, gate order, token errors, token and counterparty names
   abi.ts          vault + ERC-3643 ABI fragments, token errors, RejectReason enum
   tools/
     types.ts                     VaultTool interface, shared input schema, error naming
     get-portfolio.ts             balances, token config, caps and today's usage, read from the vault
     check-transfer.ts            pre-check: one eth_call, decodes the return value
-    execute-transfer.ts          writeContract + receipt event decoding
+    execute-transfer.ts          writeContract + receipt event decoding (vault logs only)
+    tools.test.ts                error naming, get_portfolio failure, receipt decoding
 ```

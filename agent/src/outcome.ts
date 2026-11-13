@@ -28,7 +28,7 @@ export function decodeDetail(detail: Hex): DecodedDetail {
     return {
       raw: detail,
       decoded: null,
-      note: `Unknown error selector ${detail.slice(0, 10)}. Not one of the known ERC-3643 token errors.`,
+      note: `Could not decode ${detail.slice(0, 10)}: not one of the known ERC-3643 token errors, or its arguments are malformed.`,
     };
   }
 }

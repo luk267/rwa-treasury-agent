@@ -56,3 +56,16 @@ test("describeRejection decodes detail for the ERC-3643 gate", () => {
   assert.equal(result.reason, "ERC3643Compliance");
   assert.equal(result.detail?.decoded, "UnverifiedIdentity()");
 });
+
+test("a known selector with malformed arguments gives a neutral note", () => {
+  // FrozenWallet(address) selector, but no address after it.
+  const selector = encodeErrorResult({
+    abi: TOKEN_ERRORS_ABI,
+    errorName: "FrozenWallet",
+    args: [WALLET],
+  }).slice(0, 10) as `0x${string}`;
+  const result = decodeDetail(selector);
+  assert.equal(result.decoded, null);
+  assert.match(result.note ?? "", /Could not decode/);
+  assert.doesNotMatch(result.note ?? "", /Unknown error selector/);
+});

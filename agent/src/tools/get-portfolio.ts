@@ -2,7 +2,7 @@ import { formatUnits, maxUint256, type PublicClient } from "viem";
 import { z } from "zod";
 import { IERC3643_ABI, VAULT_ABI } from "../abi.js";
 import type { Deployment, Token } from "../config.js";
-import { inputSchema, type VaultTool } from "./types.js";
+import { inputSchema, toolError, type VaultTool } from "./types.js";
 
 const noInput = z.object({});
 
@@ -13,7 +13,7 @@ function formatCap(value: bigint, token: Token): string {
 
 export function createGetPortfolioTool(
   deployment: Deployment,
-  publicClient: PublicClient,
+  publicClient: Pick<PublicClient, "readContract">,
 ): VaultTool<z.infer<typeof noInput>> {
   const vault = deployment.vault;
 
@@ -92,11 +92,15 @@ export function createGetPortfolioTool(
     parse: (input) => noInput.parse(input),
     requiresApproval: false,
     async run() {
-      const [holdings, counterparties] = await Promise.all([
-        Promise.all(deployment.tokens.map(readToken)),
-        Promise.all(deployment.counterparties.map(readCounterparty)),
-      ]);
-      return { vault, holdings, counterparties };
+      try {
+        const [holdings, counterparties] = await Promise.all([
+          Promise.all(deployment.tokens.map(readToken)),
+          Promise.all(deployment.counterparties.map(readCounterparty)),
+        ]);
+        return { vault, holdings, counterparties };
+      } catch (err) {
+        return { success: false, ...toolError(err) };
+      }
     },
   };
 }

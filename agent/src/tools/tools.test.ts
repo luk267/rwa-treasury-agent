@@ -1,0 +1,163 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  BaseError,
+  encodeAbiParameters,
+  encodeErrorResult,
+  encodeEventTopics,
+  type Log,
+  type TransactionReceipt,
+} from "viem";
+import { TOKEN_ERRORS_ABI, VAULT_ABI } from "../abi.js";
+import { ToolInputError, type Deployment } from "../config.js";
+import { createExecuteTransferTool } from "./execute-transfer.js";
+import { createGetPortfolioTool } from "./get-portfolio.js";
+import { toolError } from "./types.js";
+
+const VAULT = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
+const MOCK = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const CP1 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+const AGENT = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
+const TX_HASH = `0x${"ab".repeat(32)}` as const;
+
+const deployment: Deployment = {
+  chainId: 31337,
+  rpcUrl: "http://127.0.0.1:8545",
+  vault: VAULT,
+  roles: { admin: AGENT, treasurer: AGENT, pauser: AGENT, agent: AGENT },
+  tokens: [{ address: MOCK, symbol: "MOCK", decimals: 18 }],
+  counterparties: [{ address: CP1, name: "cp1" }],
+  vaultFunding: "100000",
+};
+
+// --- toolError ---
+
+test("toolError names a bad tool argument by its code", () => {
+  const err = new ToolInputError("UnknownToken", 'Unknown token "USDC".');
+  assert.deepEqual(toolError(err), { reason: "UnknownToken", detail: 'Unknown token "USDC".' });
+});
+
+test("toolError reports a viem error as RpcError with its short message", () => {
+  const err = new BaseError("HTTP request failed.", { details: "connect ECONNREFUSED" });
+  assert.match(err.message, /ECONNREFUSED/);
+  assert.deepEqual(toolError(err), { reason: "RpcError", detail: "HTTP request failed." });
+});
+
+test("toolError reports any other failure as RpcError", () => {
+  assert.deepEqual(toolError(new Error("boom")), { reason: "RpcError", detail: "boom" });
+  assert.deepEqual(toolError("plain string"), { reason: "RpcError", detail: "plain string" });
+});
+
+// --- get_portfolio ---
+
+test("get_portfolio reports a failed read as RpcError", async () => {
+  const publicClient = {
+    async readContract(): Promise<never> {
+      throw new BaseError('The contract function "balanceOf" returned no data ("0x").', {
+        details: "long viem text with a docs link",
+      });
+    },
+  };
+  const tool = createGetPortfolioTool(deployment, publicClient);
+  assert.deepEqual(await tool.run({}), {
+    success: false,
+    reason: "RpcError",
+    detail: 'The contract function "balanceOf" returned no data ("0x").',
+  });
+});
+
+// --- execute_transfer ---
+
+type MinedLog = Log<bigint, number, false>;
+const BLOCK_HASH = `0x${"cd".repeat(32)}` as const;
+
+/** A receipt log that looks like a vault event, emitted by `address`. */
+function rejectedLog(address: `0x${string}`): MinedLog {
+  const detail = encodeErrorResult({ abi: TOKEN_ERRORS_ABI, errorName: "UnverifiedIdentity" });
+  return {
+    address,
+    topics: encodeEventTopics({
+      abi: VAULT_ABI,
+      eventName: "TransferRejected",
+      args: { token: MOCK, to: CP1 },
+    }) as Log["topics"],
+    data: encodeAbiParameters(
+      [{ type: "uint256" }, { type: "uint8" }, { type: "bytes" }],
+      [500n * 10n ** 18n, 5, detail],
+    ),
+    blockHash: BLOCK_HASH,
+    blockNumber: 15n,
+    logIndex: 0,
+    transactionHash: TX_HASH,
+    transactionIndex: 0,
+    removed: false,
+  };
+}
+
+function executedLog(address: `0x${string}`): MinedLog {
+  return {
+    ...rejectedLog(address),
+    topics: encodeEventTopics({
+      abi: VAULT_ABI,
+      eventName: "TransferExecuted",
+      args: { token: MOCK, to: CP1, by: AGENT },
+    }) as Log["topics"],
+    data: encodeAbiParameters([{ type: "uint256" }], [500n * 10n ** 18n]),
+  };
+}
+
+/** A mined receipt with these logs. Only status and logs matter to the tool. */
+function receipt(logs: MinedLog[]): TransactionReceipt {
+  return {
+    blockHash: BLOCK_HASH,
+    blockNumber: 15n,
+    contractAddress: null,
+    cumulativeGasUsed: 0n,
+    effectiveGasPrice: 0n,
+    from: AGENT,
+    gasUsed: 0n,
+    logs,
+    logsBloom: "0x",
+    status: "success",
+    to: VAULT,
+    transactionHash: TX_HASH,
+    transactionIndex: 0,
+    type: "eip1559",
+  };
+}
+
+function executeTool(logs: MinedLog[]) {
+  const walletClient = {
+    async writeContract() {
+      return TX_HASH;
+    },
+  };
+  const publicClient = {
+    async waitForTransactionReceipt() {
+      return receipt(logs);
+    },
+  };
+  return createExecuteTransferTool(deployment, publicClient, walletClient);
+}
+
+const transfer = { token: "MOCK", to: "cp1", amount: "500" };
+
+test("execute_transfer reads the outcome from the vault's event", async () => {
+  const result = await executeTool([rejectedLog(VAULT)]).run(transfer);
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "ERC3643Compliance");
+  assert.deepEqual(result.detail, { raw: "0x58c10a24", decoded: "UnverifiedIdentity()" });
+});
+
+test("execute_transfer ignores a look-alike event from another contract", async () => {
+  // The token emits a fake TransferRejected before the vault's real TransferExecuted.
+  const result = await executeTool([rejectedLog(MOCK), executedLog(VAULT)]).run(transfer);
+  assert.equal(result.success, true);
+  assert.equal(result.event, "TransferExecuted");
+});
+
+test("execute_transfer without a vault event reports UnknownOutcome", async () => {
+  const result = await executeTool([executedLog(MOCK)]).run(transfer);
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "UnknownOutcome");
+});

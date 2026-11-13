@@ -9,8 +9,17 @@ export class AgentLoopError extends Error {
   override name = "AgentLoopError";
 }
 
+/** The part of the Anthropic client the loop uses. Tests pass a fake. */
+export interface MessagesClient {
+  messages: {
+    create(
+      params: Anthropic.MessageCreateParamsNonStreaming,
+    ): Promise<Pick<Anthropic.Message, "content" | "stop_reason">>;
+  };
+}
+
 export interface RunAgentOptions {
-  client: Anthropic;
+  client: MessagesClient;
   model: string;
   system: string;
   userPrompt: string;
