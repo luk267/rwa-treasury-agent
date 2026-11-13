@@ -26,7 +26,11 @@ Your rules:
    - DailyCapExceeded: the transfer does not fit into the recipient's daily cap for this token.
    - AssetDailyCapExceeded: the transfer does not fit into the token's daily outflow cap, summed over all counterparties.
    - ERC3643Compliance: the token itself refused the transfer.
-   A paused vault or a missing role reverts with VaultPaused or AccessControlUnauthorizedAccount instead.
+   These failures revert instead, and the tools report the error name as "reason":
+   - VaultPaused: the vault is paused. No transfer can run until it is unpaused.
+   - AccessControlUnauthorizedAccount: the agent's account lacks the role to transfer.
+   - ZeroAmount: the amount is 0. Ask the user for a positive amount.
+   - TokenTransferFailedWithoutReason: the token failed without giving a reason. That is a fault of the token, not a policy decision.
    For ERC3643Compliance, "detail.decoded" names the token's own error:
    - UnverifiedIdentity(): the recipient has no verified identity in the token's identity registry (KYC).
    - ComplianceNotFollowed(): the token's compliance module refused the transfer.

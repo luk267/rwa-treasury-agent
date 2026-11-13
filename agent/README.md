@@ -190,7 +190,8 @@ src/
   outcome.test.ts decoder tests
   config.ts       validates deployments/local.json (zod), viem clients, token/counterparty/amount parsing
   config.test.ts  names, addresses, amounts, broken deployment files
-  prompt.ts       system prompt: rules, gate order, token errors, token and counterparty names
+  prompt.ts       system prompt: rules, gate order, reverts, token errors, token and counterparty names
+  prompt.test.ts  the prompt explains every reject reason, vault revert and token error
   abi.ts          vault + ERC-3643 ABI fragments, token errors, RejectReason enum
   tools/
     types.ts                     VaultTool interface, shared input schema, error naming
