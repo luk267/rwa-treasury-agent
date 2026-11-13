@@ -1,20 +1,12 @@
-import {
-  BaseError,
-  ContractFunctionRevertedError,
-  type Account,
-  type PublicClient,
-} from "viem";
+import type { Account, PublicClient } from "viem";
 import { VAULT_ABI } from "../abi.js";
-import {
-  findToken,
-  parseAmount,
-  resolveCounterparty,
-  type Deployment,
-} from "../config.js";
+import type { Deployment } from "../config.js";
 import { describeRejection } from "../outcome.js";
 import {
   inputSchema,
+  revertName,
   toolError,
+  transferArgs,
   transferInput,
   type TransferInput,
   type VaultTool,
@@ -22,7 +14,7 @@ import {
 
 export function createCheckTransferTool(
   deployment: Deployment,
-  publicClient: PublicClient,
+  publicClient: Pick<PublicClient, "simulateContract">,
   account: Account,
 ): VaultTool<TransferInput> {
   return {
@@ -35,11 +27,9 @@ export function createCheckTransferTool(
     },
     parse: (input) => transferInput.parse(input),
     requiresApproval: false,
-    async run({ token, to, amount }) {
+    async run(input) {
       try {
-        const tokenInfo = findToken(deployment, token);
-        const recipient = resolveCounterparty(deployment, to);
-        const amountWei = parseAmount(amount, tokenInfo);
+        const args = transferArgs(deployment, input);
 
         // One eth_call runs the same code as the real transaction. executeTransfer
         // returns its outcome, so no event logs are needed. A missing role, a paused
@@ -51,19 +41,12 @@ export function createCheckTransferTool(
             address: deployment.vault,
             abi: VAULT_ABI,
             functionName: "executeTransfer",
-            args: [tokenInfo.address, recipient, amountWei],
+            args,
           });
           outcome = result;
         } catch (err) {
-          if (err instanceof BaseError) {
-            const reverted = err.walk(
-              (e) => e instanceof ContractFunctionRevertedError,
-            );
-            if (reverted instanceof ContractFunctionRevertedError) {
-              const errorName = reverted.data?.errorName ?? "UnknownRevert";
-              return { feasible: false, reason: errorName };
-            }
-          }
+          const reverted = revertName(err);
+          if (reverted) return { feasible: false, reason: reverted };
           throw err;
         }
 

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BaseError,
+  ContractFunctionRevertedError,
   encodeAbiParameters,
   encodeErrorResult,
   encodeEventTopics,
@@ -10,9 +11,10 @@ import {
 } from "viem";
 import { TOKEN_ERRORS_ABI, VAULT_ABI } from "../abi.js";
 import { ToolInputError, type Deployment } from "../config.js";
+import { createCheckTransferTool } from "./check-transfer.js";
 import { createExecuteTransferTool } from "./execute-transfer.js";
 import { createGetPortfolioTool } from "./get-portfolio.js";
-import { toolError } from "./types.js";
+import { revertName, toolError, transferArgs } from "./types.js";
 
 const VAULT = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
 const MOCK = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
@@ -46,6 +48,82 @@ test("toolError reports a viem error as RpcError with its short message", () => 
 test("toolError reports any other failure as RpcError", () => {
   assert.deepEqual(toolError(new Error("boom")), { reason: "RpcError", detail: "boom" });
   assert.deepEqual(toolError("plain string"), { reason: "RpcError", detail: "plain string" });
+});
+
+// --- transferArgs ---
+
+test("transferArgs resolves symbol, name and amount into executeTransfer arguments", () => {
+  assert.deepEqual(transferArgs(deployment, { token: "mock", to: "cp1", amount: "2.5" }), [
+    MOCK,
+    CP1,
+    25n * 10n ** 17n,
+  ]);
+});
+
+test("transferArgs passes the input errors through", () => {
+  assert.throws(
+    () => transferArgs(deployment, { token: "MOCK", to: "cp9", amount: "1" }),
+    (err: unknown) => err instanceof ToolInputError && err.code === "UnknownCounterparty",
+  );
+});
+
+// --- revertName ---
+
+/** A viem error as a reverted vault call throws it: the revert sits in the cause chain. */
+function vaultRevert(data: `0x${string}`): BaseError {
+  const reverted = new ContractFunctionRevertedError({
+    abi: VAULT_ABI,
+    data,
+    functionName: "executeTransfer",
+  });
+  return new BaseError("Execution reverted.", { cause: reverted });
+}
+
+const ZERO_AMOUNT = encodeErrorResult({ abi: VAULT_ABI, errorName: "ZeroAmount" });
+const VAULT_PAUSED = encodeErrorResult({ abi: VAULT_ABI, errorName: "VaultPaused" });
+
+test("revertName reads the vault error from the cause chain", () => {
+  assert.equal(revertName(vaultRevert(ZERO_AMOUNT)), "ZeroAmount");
+});
+
+test("revertName gives UnknownRevert for revert data it cannot decode", () => {
+  assert.equal(revertName(vaultRevert("0xdeadbeef")), "UnknownRevert");
+});
+
+test("revertName gives null when the call did not revert", () => {
+  assert.equal(revertName(new BaseError("HTTP request failed.")), null);
+  assert.equal(revertName(new Error("boom")), null);
+});
+
+// --- check_transfer_feasibility ---
+
+const agentAccount = { address: AGENT, type: "json-rpc" } as const;
+
+test("check_transfer_feasibility reports a revert by its error name", async () => {
+  const publicClient = {
+    async simulateContract(): Promise<never> {
+      throw vaultRevert(ZERO_AMOUNT);
+    },
+  };
+  const tool = createCheckTransferTool(deployment, publicClient, agentAccount);
+  assert.deepEqual(await tool.run({ token: "MOCK", to: "cp1", amount: "500" }), {
+    feasible: false,
+    reason: "ZeroAmount",
+  });
+});
+
+test("check_transfer_feasibility reports any other failure as RpcError", async () => {
+  const publicClient = {
+    async simulateContract(): Promise<never> {
+      throw new BaseError("HTTP request failed.");
+    },
+  };
+  const tool = createCheckTransferTool(deployment, publicClient, agentAccount);
+  assert.deepEqual(await tool.run({ token: "MOCK", to: "cp1", amount: "500" }), {
+    feasible: false,
+    reason: "RpcError",
+    detail: "HTTP request failed.",
+  });
 });
 
 // --- get_portfolio ---
@@ -154,6 +232,36 @@ test("execute_transfer ignores a look-alike event from another contract", async 
   const result = await executeTool([rejectedLog(MOCK), executedLog(VAULT)]).run(transfer);
   assert.equal(result.success, true);
   assert.equal(result.event, "TransferExecuted");
+});
+
+test("execute_transfer reports a revert at submission by its error name", async () => {
+  const walletClient = {
+    async writeContract(): Promise<never> {
+      throw vaultRevert(VAULT_PAUSED);
+    },
+  };
+  const publicClient = {
+    async waitForTransactionReceipt(): Promise<never> {
+      throw new Error("not reached");
+    },
+  };
+  const tool = createExecuteTransferTool(deployment, publicClient, walletClient);
+  assert.deepEqual(await tool.run(transfer), {
+    success: false,
+    reason: "VaultPaused",
+    txHash: null,
+  });
+});
+
+test("execute_transfer returns the human-readable amount on success", async () => {
+  const result = await executeTool([executedLog(VAULT)]).run(transfer);
+  assert.deepEqual(result, {
+    success: true,
+    txHash: TX_HASH,
+    event: "TransferExecuted",
+    amount: "500",
+    to: CP1,
+  });
 });
 
 test("execute_transfer without a vault event reports UnknownOutcome", async () => {

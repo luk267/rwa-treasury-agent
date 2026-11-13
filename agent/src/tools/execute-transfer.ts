@@ -1,6 +1,4 @@
 import {
-  BaseError,
-  ContractFunctionRevertedError,
   decodeEventLog,
   isAddressEqual,
   type Account,
@@ -10,16 +8,13 @@ import {
   type WalletClient,
 } from "viem";
 import { VAULT_ABI } from "../abi.js";
-import {
-  findToken,
-  parseAmount,
-  resolveCounterparty,
-  type Deployment,
-} from "../config.js";
+import type { Deployment } from "../config.js";
 import { describeRejection } from "../outcome.js";
 import {
   inputSchema,
+  revertName,
   toolError,
+  transferArgs,
   transferInput,
   type TransferInput,
   type VaultTool,
@@ -40,11 +35,10 @@ export function createExecuteTransferTool(
     },
     parse: (input) => transferInput.parse(input),
     requiresApproval: true,
-    async run({ token, to, amount }) {
+    async run(input) {
       try {
-        const tokenInfo = findToken(deployment, token);
-        const recipient = resolveCounterparty(deployment, to);
-        const amountWei = parseAmount(amount, tokenInfo);
+        const args = transferArgs(deployment, input);
+        const [, recipient] = args;
 
         // Submission. Returns tx hash before inclusion. May throw if the RPC
         // rejects the tx - typically because its internal gas-estimate eth_call
@@ -55,18 +49,11 @@ export function createExecuteTransferTool(
             address: deployment.vault,
             abi: VAULT_ABI,
             functionName: "executeTransfer",
-            args: [tokenInfo.address, recipient, amountWei],
+            args,
           });
         } catch (err) {
-          if (err instanceof BaseError) {
-            const reverted = err.walk(
-              (e) => e instanceof ContractFunctionRevertedError,
-            );
-            if (reverted instanceof ContractFunctionRevertedError) {
-              const errorName = reverted.data?.errorName ?? "UnknownRevert";
-              return { success: false, reason: errorName, txHash: null };
-            }
-          }
+          const reverted = revertName(err);
+          if (reverted) return { success: false, reason: reverted, txHash: null };
           throw err;
         }
 
@@ -105,7 +92,7 @@ export function createExecuteTransferTool(
               success: true,
               txHash,
               event: "TransferExecuted",
-              amount,
+              amount: input.amount,
               to: recipient,
             };
           }

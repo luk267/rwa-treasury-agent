@@ -194,9 +194,9 @@ src/
   prompt.test.ts  the prompt explains every reject reason, vault revert and token error
   abi.ts          vault + ERC-3643 ABI fragments, token errors, RejectReason enum
   tools/
-    types.ts                     VaultTool interface, shared input schema, error naming
+    types.ts                     VaultTool interface, shared input schema, transfer arguments, revert and error naming
     get-portfolio.ts             balances, token config, caps and today's usage, read from the vault
     check-transfer.ts            pre-check: one eth_call, decodes the return value
     execute-transfer.ts          writeContract + receipt event decoding (vault logs only)
-    tools.test.ts                error naming, get_portfolio failure, receipt decoding
+    tools.test.ts                shared helpers, revert and failure paths, receipt decoding
 ```

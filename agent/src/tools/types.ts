@@ -1,7 +1,13 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { BaseError } from "viem";
+import { BaseError, ContractFunctionRevertedError } from "viem";
 import { z } from "zod";
-import { ToolInputError } from "../config.js";
+import {
+  ToolInputError,
+  findToken,
+  parseAmount,
+  resolveCounterparty,
+  type Deployment,
+} from "../config.js";
 
 /** A vault operation the model may call. The loop in loop.ts drives these. */
 export interface VaultTool<Input> {
@@ -26,6 +32,29 @@ export const transferInput = z.object({
   amount: z.string().describe("Human-readable amount, e.g. '500'"),
 });
 export type TransferInput = z.infer<typeof transferInput>;
+
+/**
+ * Resolve the model's transfer input into the arguments of executeTransfer:
+ * token address, recipient address, amount in base units. Throws ToolInputError.
+ */
+export function transferArgs(
+  deployment: Deployment,
+  { token, to, amount }: TransferInput,
+): readonly [`0x${string}`, `0x${string}`, bigint] {
+  const tokenInfo = findToken(deployment, token);
+  return [tokenInfo.address, resolveCounterparty(deployment, to), parseAmount(amount, tokenInfo)];
+}
+
+/**
+ * The vault error a viem call reverted with, e.g. "VaultPaused". "UnknownRevert"
+ * if the revert data does not decode, null if the call did not revert.
+ */
+export function revertName(err: unknown): string | null {
+  if (!(err instanceof BaseError)) return null;
+  const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError);
+  if (!(reverted instanceof ContractFunctionRevertedError)) return null;
+  return reverted.data?.errorName ?? "UnknownRevert";
+}
 
 /** Name the failure: a bad tool argument, or an RPC problem for everything else. */
 export function toolError(err: unknown): { reason: string; detail: string } {
