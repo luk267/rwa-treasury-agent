@@ -10,9 +10,10 @@ each token per counterparty per day, how much of each token may leave per day.
 
 This project lets an AI agent run that treasury without trusting it. The agent
 proposes transfers. A Solidity vault applies the treasury's rules, then hands
-the transfer to the token, which applies the issuer's rules. Every refused
-attempt stays in the on-chain log with a typed reason, including the token's
-own error.
+the transfer to the token, which applies the issuer's rules. The agent
+dry-runs every transfer first and does not send one that would be refused.
+A refused transfer that is sent anyway stays in the on-chain log with a typed
+reason, including the token's own error.
 
 The agent (TypeScript, `@anthropic-ai/sdk` + viem) runs a short tool loop over
 the Claude Messages API with three tools: read holdings, simulate a transfer,
@@ -22,20 +23,30 @@ submit one. Its reasoning is observability, not authorization.
 
 ## Demo
 
-Four scenes, replayed by [`scripts/demo.sh`](scripts/demo.sh) against the
+Five scenes, replayed by [`scripts/demo.sh`](scripts/demo.sh) against the
 local stack:
 
 | Scene | Prompt                      | Outcome                                                         |
 | ----- | --------------------------- | --------------------------------------------------------------- |
 | 1     | `show the vault holdings`   | 100,000 MOCK in the vault                                       |
 | 2     | `transfer 500 MOCK to cp1`  | Executed, within all limits                                     |
-| 3     | `transfer 6000 MOCK to cp1` | Refused by the vault: cp1's daily cap is 5,000 MOCK             |
-| 4     | `transfer 100 MOCK to cp3`  | Refused by the token: `UnverifiedIdentity()`, cp3 has no KYC    |
+| 3     | `transfer 6000 MOCK to cp1` | Pre-check refused by the vault: cp1's daily cap is 5,000 MOCK   |
+| 4     | `transfer 100 MOCK to cp3`  | Pre-check refused by the token: `UnverifiedIdentity()`, no KYC  |
+| 5     | none, `cast send`           | Scene 4's transfer sent anyway: `TransferRejected` in the log   |
+
+Scenes 3 and 4 stop at the pre-check: one `eth_call`, no transaction. The
+agent's prompt forbids sending a transfer the dry run refused, so these
+refusals leave no trace on the chain. Scene 5 shows what happens when a
+refused transfer is sent anyway, for example by a faulty or compromised
+agent. It runs without the Claude API: `cast send` submits scene 4's transfer
+from the agent's account, and `cast logs` reads the vault's entry back with
+reason 5 (`ERC3643Compliance`) and detail `0x58c10a24`
+(`UnverifiedIdentity()`). That entry is what a monitor finds.
 
 Scene 4 from a real run, shortened (`[...]` marks the cuts):
 
 ```text
-=== Scene 4/4: Rejected by the token: unverified identity ===
+=== Scene 4/5: Refused in the pre-check: unverified identity ===
 > transfer 100 MOCK to cp3
 
 → get_portfolio({})
@@ -67,6 +78,27 @@ has no verified identity (KYC) in MOCK's identity registry. [...]
 [...]
 --- done (turns: 3) ---
 ```
+
+Scene 5 from a real run, complete:
+
+```text
+=== Scene 5/5: The refusal in the on-chain log ===
+> no agent: send scene 4's transfer from the agent account with cast
+
+cast send <vault> "executeTransfer(address,address,uint256)" <MOCK> <cp3> 100ether
+  from 0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc, block 15, status success
+
+cast logs --address <vault> --from-block 0 "TransferRejected(...)"
+  TransferRejected entries in the chain: 1
+  block 15, tx 0x0537c05625f0fc2c70f081d7d74d27a16cb90a8232fbe4a6ffefe363606aefea
+    to     0x976ea74026e726554db657fa54763abd0c3a0aa9
+    amount 100 MOCK
+    reason 5 = ERC3643Compliance
+    detail 0x58c10a24 = UnverifiedIdentity()
+```
+
+The transaction succeeds although the transfer was refused: policy decisions
+are logged, not reverted (see [How it works](#how-it-works)).
 
 The [Quick start](#quick-start) shows how to run it yourself.
 
@@ -200,10 +232,11 @@ cd agent && npm install
 cp ../.env.example .env                # then set ANTHROPIC_API_KEY
 npm start "show the vault holdings"
 npm start "transfer 500 MOCK to cp1"   # asks "Proceed? [y/N]" before sending
-../scripts/demo.sh                     # the four demo scenes
+../scripts/demo.sh                     # the five demo scenes
 ```
 
-Every agent run calls the Claude API and uses a little API credit. See
+Every agent run calls the Claude API and uses a little API credit. Scene 5 of
+the demo does not. See
 [`agent/README.md`](agent/README.md) for flags, exit codes and configuration.
 
 ---
@@ -244,7 +277,7 @@ docs/
 
 scripts/
   local-dev.sh                  Anvil + deploy + write deployments/local.json
-  demo.sh                       replays the four demo scenes against the local stack
+  demo.sh                       replays the five demo scenes against the local stack
 ```
 
 ---

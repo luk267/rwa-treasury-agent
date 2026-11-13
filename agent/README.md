@@ -111,6 +111,13 @@ The pre-check is an aid for the model and the operator, not a control.
 `execute_transfer` sends a real transaction, and the vault runs every check
 again.
 
+A refusal in the pre-check leaves nothing on the chain: the prompt forbids
+the model to send a transfer the dry run refused. Only a sent and refused
+transfer emits `TransferRejected`. In the demo, scenes 3 and 4 stop at the
+pre-check. Scene 5 sends scene 4's transfer from the agent's account with
+`cast`, without the agent, and shows the `TransferRejected` entry a monitor
+finds.
+
 ## Local development
 
 The agent reads `deployments/local.json`, which is written by the repo's
@@ -132,7 +139,7 @@ npm start "show the vault holdings"
 npm start "transfer 500 MOCK to cp1"       # asks before sending
 npm start -- --yes "try to transfer 10000 MOCK to cp1"   # hits the daily cap
 npm start -- --yes "transfer 100 MOCK to cp3"            # token: unverified identity
-../scripts/demo.sh                                       # the four demo scenes
+../scripts/demo.sh                                       # the five demo scenes
 ```
 
 Note the `--` before `--yes`: without it, npm reads `--yes` as its own flag.
