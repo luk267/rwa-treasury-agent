@@ -100,6 +100,10 @@ The tool runs `simulateContract` first to catch any revert, then
 outcome an on-chain submission would produce - including which gate would
 have rejected it.
 
+The simulation is an aid for the model and the operator, not a control.
+`execute_transfer` sends a real transaction, and the vault runs every check
+again.
+
 ## Local development
 
 The agent reads `deployments/local.json`, which is written by the repo's
@@ -121,6 +125,7 @@ npm start "show the vault holdings"
 npm start "transfer 500 MOCK to cp1"       # asks before sending
 npm start -- --yes "try to transfer 10000 MOCK to cp1"   # hits the daily cap
 npm start -- --yes "transfer 100 MOCK to cp3"            # token: unverified identity
+../scripts/demo.sh                                       # the four demo scenes
 ```
 
 Note the `--` before `--yes`: without it, npm reads `--yes` as its own flag.
@@ -151,12 +156,12 @@ Copy `../.env.example` to `.env`. The agent reads three variables:
 | `AGENT_MODEL`        | no       | Claude model ID. Defaults to `claude-opus-5-5`. |
 | `AGENT_AUTO_APPROVE` | no       | `1` skips the transfer prompt, like `--yes`.    |
 
-`RPC_URL_SEPOLIA` and `PRIVATE_KEY` are for non-local networks. Sepolia wiring
-is not yet enabled - the current [`src/config.ts`](src/config.ts) hardcodes
-Anvil account #5 and the `foundry` chain, with a Sepolia path planned as the
-next milestone. Account #5 holds `AGENT_ROLE` and no other role. At startup the
-agent checks that its key matches `roles.agent` in `deployments/local.json` and
-exits with an error otherwise.
+The agent only runs against the local Anvil stack.
+[`src/config.ts`](src/config.ts) hardcodes Anvil account #5 and the `foundry`
+chain. The agent does not read `RPC_URL_SEPOLIA` or `PRIVATE_KEY`. Account #5
+holds `AGENT_ROLE` and no other role. At startup the agent checks that its key
+matches `roles.agent` in `deployments/local.json` and exits with an error
+otherwise.
 
 ## Source layout
 
