@@ -30,8 +30,8 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
     }
 
     /// @dev When the ERC-3643 token rejects the transfer (here: the compliance contract says no),
-    ///      the vault must NOT revert. Instead it emits TransferRejected with the
-    ///      revert reason from the token so the agent can read it.
+    ///      the vault must NOT revert. Instead it emits TransferRejected with the revert
+    ///      reason from the token, returns the same values, and the agent can read either.
     function test_executeTransfer_erc3643Rejects_emitsRejectedWithReason() external {
         // Make the stubbed compliance contract refuse every transfer
         token.setCompliance(false);
@@ -41,7 +41,13 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
 
         vm.expectEmit();
         emit TransferRejected(address(token), cp1, 500e18, TreasuryVault.RejectReason.ERC3643Compliance, expectedReason);
-        vault.executeTransfer(address(token), cp1, 500e18);
+        (bool executed, TreasuryVault.RejectReason reason, bytes memory detail) =
+            vault.executeTransfer(address(token), cp1, 500e18);
+
+        // The return value carries the same reason and the same token error as the event.
+        assertFalse(executed);
+        assertEq(uint8(reason), uint8(TreasuryVault.RejectReason.ERC3643Compliance));
+        assertEq(detail, expectedReason);
     }
 
     /// @dev After an ERC-3643 rejection, no tokens should have moved.

@@ -85,8 +85,7 @@ export function createExecuteTransferTool(
           };
         }
 
-        // Same log-decoding shape as check_transfer_feasibility - but on a real
-        // receipt rather than simulated logs.
+        // The receipt has no return value, so the outcome comes from the vault's event.
         for (const log of receipt.logs) {
           let decoded;
           try {

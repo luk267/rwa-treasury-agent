@@ -45,8 +45,8 @@ freeze the vault's tokens directly (see [Issuer rights](#issuer-rights)).
 
 | Component                 | Role                                                                                                                       | Lives in                       |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `TreasuryVault.sol`       | Holds ERC-3643 tokens. Runs gates 1–4, then calls the token's `transfer` (gate 5) and surfaces the outcome as an event.   | `contracts/src/`               |
-| `IERC3643.sol`            | Minimal ERC-20 subset of ERC-3643. The vault calls only `transfer`; the agent reads `balanceOf`; `transferFrom` is unused. | `contracts/src/interfaces/`    |
+| `TreasuryVault.sol`       | Holds ERC-3643 tokens. Runs gates 1–4, then calls the token's `transfer` (gate 5) and surfaces the outcome as an event and as a return value. | `contracts/src/`               |
+| `IERC3643.sol`            | The one ERC-3643 function the vault calls: `transfer`.                                                                     | `contracts/src/interfaces/`    |
 | `MockERC3643.sol`         | Test double modelled on T-REX v5: checks pause, freeze, balance, recipient identity and compliance in that order and reverts with the v5 error names. Its deployer is the issuer agent: verifies wallets, freezes, pauses, forces transfers. | `contracts/test/mocks/`        |
 | TypeScript agent          | Own tool loop over the Claude Messages API with three tools (read holdings and limits from the chain, simulate, submit). Asks the operator before a real transfer. System prompt requires simulate before execute and maps `RejectReason` and the decoded token error back to plain language. | `agent/src/` |
 | `DeployLocal.s.sol`       | Foundry script: deploys both contracts, verifies the vault, `cp1` and `cp2` in the token, funds the vault, allows the token with a daily outflow cap, whitelists three counterparties and sets their daily caps for the token. | `contracts/script/`            |
@@ -97,15 +97,17 @@ reverts until `unpause()`. To lock the agent out for good, the admin calls
 
 ## Transfer flow
 
-`executeTransfer(token, to, amount)` first checks authorization, then runs
-five gates in a fixed order:
+`executeTransfer(token, to, amount)` first checks authorization and input,
+then runs five gates in a fixed order:
 
-- **Authorization reverts.** A caller without `AGENT_ROLE` reverts with
-  `AccessControlUnauthorizedAccount`. While the vault is paused, every call
-  reverts with `VaultPaused`. The caller had no right to ask.
-- **Policy decisions are logged.** Each of the five gates either rejects the
-  transfer (emit `TransferRejected`, return) or lets it through to the next
-  gate. Gates 1–4 are the vault's own rules; gate 5 is the token's. Every
+- **Authorization and invalid input revert.** A caller without `AGENT_ROLE`
+  reverts with `AccessControlUnauthorizedAccount`. While the vault is paused,
+  every call reverts with `VaultPaused`. An amount of 0 reverts with
+  `ZeroAmount`, and a call back into `executeTransfer` while it runs reverts
+  with `ReentrancyGuardReentrantCall`. The caller had no right to ask.
+- **Policy decisions are logged and returned.** Each of the five gates either
+  rejects the transfer (emit `TransferRejected`, return the same values) or
+  lets it through to the next gate. Gates 1–4 are the vault's own rules; gate 5 is the token's. Every
   vault gate is default-deny: a token must be allowed, a counterparty must be
   active, and a cap that was never set is 0. "Unlimited" is the explicit
   value `type(uint256).max`.
@@ -116,7 +118,9 @@ flowchart TD
     Role -->|"no"| RevertRole["revert AccessControlUnauthorizedAccount"]
     Role -->|"yes"| Pause{"paused?"}
     Pause -->|"yes"| Revert["revert VaultPaused"]
-    Pause -->|"no"| AL{"gate 1<br/>token<br/>allowed?"}
+    Pause -->|"no"| Amount{"amount<br/>== 0?"}
+    Amount -->|"yes"| RevertZero["revert ZeroAmount"]
+    Amount -->|"no"| AL{"gate 1<br/>token<br/>allowed?"}
     AL -->|"no"| RJ1["TransferRejected<br/>(AssetNotAllowed)"]
     AL -->|"yes"| WL{"gate 2<br/>counterparty<br/>active?"}
     WL -->|"no"| RJ2["TransferRejected<br/>(NotWhitelisted)"]
@@ -125,26 +129,42 @@ flowchart TD
     DC -->|"yes"| AC{"gate 4<br/>daily outflow cap<br/>(per token)<br/>still has room?"}
     AC -->|"no"| RJ4["TransferRejected<br/>(AssetDailyCapExceeded)"]
     AC -->|"yes"| ERC["gate 5<br/>try token.transfer(to, amount)"]
-    ERC -->|"reverts or<br/>returns false"| RJ5["TransferRejected<br/>(ERC3643Compliance, detail)"]
+    ERC -->|"reverts with data"| RJ5["TransferRejected<br/>(ERC3643Compliance, detail)"]
+    ERC -->|"reverts without data<br/>(also out of gas)<br/>or returns false"| RevertNoReason["revert<br/>TokenTransferFailedWithoutReason"]
     ERC -->|"returns true"| OK["update daily counters<br/>emit TransferExecuted"]
 ```
 
-Two design choices are worth flagging:
+Three design choices are worth flagging:
 
 1. **Policy rejections do not revert.** They emit `TransferRejected` with a
    typed reason and, for gate 5, the token's revert data. A monitor finds
    every blocked attempt with one `eth_getLogs` filter, without a trace API
-   or an archive node. The agent layer treats `TransferRejected` as a normal
-   outcome, not an error. The trade-offs (gas for rejected attempts, a
-   "success" status in wallets) are in
+   or an archive node. `executeTransfer` also returns
+   `(bool executed, RejectReason reason, bytes detail)` with the same values,
+   so a calling contract sees the outcome without reading logs, and the
+   agent's pre-check is one `eth_call` of the same code. The agent layer
+   treats a rejection as a normal outcome, not an error. The trade-offs (gas
+   for rejected attempts, a "success" status in wallets) are in
    [ADR-0001](adr/0001-emit-instead-of-revert.md).
-2. **Counters update only on success.** `_dailySpent[to][token][day]` and
-   `_assetDailySpent[token][day]` are written *after* `token.transfer`
-   returns true. A rejected ERC-3643 call leaves the counters untouched
-   (verified by `test_executeTransfer_erc3643Rejects_dailyCapNotConsumed`).
+2. **Only a reason from the token is logged.** If the token reverts without
+   data or returns `false`, the vault reverts with
+   `TokenTransferFailedWithoutReason`. An out-of-gas inside the token looks
+   exactly like that: the vault keeps 1/64 of its gas for after the call
+   (EIP-150), and an empty revert is all it sees. Logging it would let the
+   agent fake a compliance rejection by choosing the gas limit (verified by
+   `test_executeTransfer_outOfGasInToken_neverLogsRejection`).
+3. **Counters update only on success, behind a re-entrancy guard.**
+   `_dailySpent[to][token][day]` and `_assetDailySpent[token][day]` are
+   written *after* `token.transfer` returns true. A rejected ERC-3643 call
+   leaves the counters untouched (verified by
+   `test_executeTransfer_erc3643Rejects_dailyCapNotConsumed`). Writing after
+   the external call breaks checks-effects-interactions, so `executeTransfer`
+   is `nonReentrant` (OpenZeppelin `ReentrancyGuardTransient`). A token that
+   calls back into the vault cannot pass the caps twice (verified by
+   `test_executeTransfer_reentrantToken_cannotBypassCaps`).
 
 For the source, see
-[`contracts/src/TreasuryVault.sol:120-179`](../contracts/src/TreasuryVault.sol).
+[`contracts/src/TreasuryVault.sol:123-190`](../contracts/src/TreasuryVault.sol).
 
 ---
 
@@ -152,12 +172,12 @@ For the source, see
 
 | Check | Stored as                                       | Configured by               | Behaviour                                                                                                              |
 | ----- | ----------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Auth  | OpenZeppelin role storage and `bool _paused`    | admin (roles), `pause` / `unpause` | Not a gate. Reverts without `AGENT_ROLE`, and reverts `VaultPaused` while paused. Hard stop for every attempt.  |
+| Auth  | OpenZeppelin role storage and `bool _paused`    | admin (roles), `pause` / `unpause` | Not a gate. Reverts without `AGENT_ROLE`, and reverts `VaultPaused` while paused. Hard stop for every attempt. A zero amount and a re-entrant call revert too. |
 | 1     | `mapping(address token => AssetConfig) _assets` | `setAssetConfig(token, allowed, dailyOutflowCap)` | The token must have `allowed == true`. A token that was never configured is not allowed. Emits `AssetNotAllowed`. |
 | 2     | `mapping(address cp => Counterparty) _counterparties` | `addCounterparty` / `deactivateCounterparty` | Recipient must have `active == true`. Deactivation is soft; re-adding keeps the first `addedAt` for audit. Emits `NotWhitelisted`. |
 | 3     | `_counterpartyDailyCaps[cp][token]` and `_dailySpent[cp][token][day]` | `setCounterpartyDailyCap(cp, token, dailyCap)` | Per counterparty, per token, per day. Day bucket is `block.timestamp / 1 days`. A cap that was never set is 0 and blocks the token for this counterparty. Emits `DailyCapExceeded`. |
 | 4     | `AssetConfig.dailyOutflowCap` and `_assetDailySpent[token][day]` | `setAssetConfig`             | Per token, per day, summed over all counterparties. A cap of 0 blocks the token. Emits `AssetDailyCapExceeded`. |
-| 5     | (delegated)                                     | the token contract          | `try token.transfer(to, amount)` - captures revert bytes in `detail`, or rejects on `false` return. Emits `ERC3643Compliance`. |
+| 5     | (delegated)                                     | the token contract          | `try token.transfer(to, amount)` - a revert with data becomes `ERC3643Compliance` with the bytes in `detail`. A revert without data or a `false` return reverts with `TokenTransferFailedWithoutReason`. |
 
 Gates 3 and 4 compare with `spent > cap || amount > cap - spent`. The check
 cannot overflow, and a cap lowered below what was already spent today rejects
@@ -167,9 +187,9 @@ means unlimited. `getAssetConfig`, `getCounterparty`,
 `getCounterpartyDailyCap`, `spentToday` and `assetSpentToday` expose the
 configuration and today's usage; the agent reads them at run time.
 
-Reject reasons are carried in the `RejectReason` enum on the
-`TransferRejected` event so an off-chain reader can branch on them without
-string parsing. Pause is not in the enum, because pause reverts.
+Reject reasons are carried in the `RejectReason` enum, on the
+`TransferRejected` event and in the return value of `executeTransfer`, so a
+reader can branch on them without string parsing. Pause is not in the enum, because pause reverts.
 
 ---
 
@@ -236,7 +256,7 @@ Recovery, mint and burn are not modelled. All tests are in
 | ------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
 | Agent (TypeScript)              | Propose a transfer, simulate it, explain the resulting event.          | Choose recipients, choose amounts, bypass any gate.   |
 | Operator prompt (`Proceed? [y/N]`) | Let a human stop a transfer before it is sent.                      | Act as a security boundary: the agent key can call the vault directly, so the gates must hold on their own. |
-| `TreasuryVault.sol`             | Check role and pause, apply gates 1–4, hand gate 5 to the token. Emit a faithful outcome event. | Decide jurisdiction / KYC / transfer-rule compliance. |
+| `TreasuryVault.sol`             | Check role and pause, apply gates 1–4, hand gate 5 to the token. Emit and return a faithful outcome. | Decide jurisdiction / KYC / transfer-rule compliance. |
 | ERC-3643 token                  | Final compliance decision (identity, claims, transfer rules).          | Provide reasoning suitable for off-chain explanation. |
 | Admin / Treasurer / Pauser keys | Hold role management, the configuration authority and the kill-switch. | Nothing beyond that. Assumed honest here; see [ADR-0002](adr/0002-admin-rights-and-no-upgradeability.md) for what a production setup needs. |
 | Token issuer (ERC-3643 agent)   | Verify identities, freeze wallets, pause the token, force transfers. ERC-3643 requires these rights. | Respect the vault's gates: a forced transfer moves the vault's tokens without a vault event and without touching its counters. |
@@ -280,7 +300,7 @@ of this repo. Three established or proposed designs solve similar problems:
 | Limit on number of calls           | No                                | Yes (`CallWithinAllowance`)            | —                             | No                                   |
 | Expiry of the agent's rights       | No                                | Planned for Roles v3, not deployed     | Yes                           | Yes (`validUntil`)                   |
 | Delay / veto queue                 | No                                | Yes (Delay Modifier)                   | —                             | No                                   |
-| Refused attempt                    | `TransferRejected` event, typed reason, transaction succeeds | Revert | Rejected on-chain (revert) | `canExecute` returns a reason; gate reverts |
+| Refused attempt                    | `TransferRejected` event and return value, typed reason, transaction succeeds | Revert | Rejected on-chain (revert) | `canExecute` returns a reason; gate reverts |
 | Token's ERC-3643 error kept on-chain | Yes, in `detail`                | No (revert discards logs)              | No (revert discards logs)     | No (revert discards logs)            |
 | External audits                    | None                              | Several (G0 Group, Omniscia, Certora, Gnosis) | —                      | —                                    |
 
@@ -322,7 +342,10 @@ which is to validate the three-layer policy + agent integration.
   two-step with a delay. The admin itself is still a single EOA, not a
   multisig. See [ADR-0002](adr/0002-admin-rights-and-no-upgradeability.md).
 - **`SafeERC20`.** The vault calls `token.transfer` directly inside
-  `try`/`catch`. A real T-REX integration would use the safe wrapper.
+  `try`/`catch` and expects a `bool`. A token that returns nothing, or an
+  address without code, makes the call revert. T-REX returns `bool`, so this
+  holds for the intended tokens; a general integration would use the safe
+  wrapper.
 - **A real T-REX deployment.** The tests run against `MockERC3643`, which
   stubs the identity registry and the compliance contract as flags.
 - **Mainnet or Sepolia deployment.** Currently local Anvil only. Sepolia
@@ -350,5 +373,5 @@ The known limitations of the current vault are listed in
 | Agent entry point: pre-flight checks, exit codes     | [`agent/src/index.ts`](../agent/src/index.ts)                                                                                   |
 | Tool loop over the Claude Messages API               | [`agent/src/loop.ts`](../agent/src/loop.ts)                                                                                     |
 | Decoding the token's revert data in `detail`         | [`agent/src/outcome.ts`](../agent/src/outcome.ts)                                                                               |
-| Two-phase simulation (revert + event logs)           | [`agent/src/tools/check-transfer.ts`](../agent/src/tools/check-transfer.ts)                                                     |
+| Pre-check: one `eth_call`, reads the return value    | [`agent/src/tools/check-transfer.ts`](../agent/src/tools/check-transfer.ts)                                                     |
 | System prompt with policy rules                      | [`agent/src/prompt.ts`](../agent/src/prompt.ts)                                                                                 |

@@ -106,7 +106,13 @@ contract TreasuryVaultWhitelistTest is Test {
     function test_executeTransfer_toUnknownCounterparty_emitsRejected_noRevert() external {
         vm.expectEmit();
         emit TransferRejected(address(token), unknown, 100, TreasuryVault.RejectReason.NotWhitelisted, "");
-        vault.executeTransfer(address(token), unknown, 100);
+        (bool executed, TreasuryVault.RejectReason reason, bytes memory detail) =
+            vault.executeTransfer(address(token), unknown, 100);
+
+        // The return value carries the same outcome as the event.
+        assertFalse(executed);
+        assertEq(uint8(reason), uint8(TreasuryVault.RejectReason.NotWhitelisted));
+        assertEq(detail, "");
     }
 
     function test_executeTransfer_toDeactivatedCounterparty_emitsRejected() external {

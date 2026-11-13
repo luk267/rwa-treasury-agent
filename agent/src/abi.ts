@@ -1,5 +1,5 @@
 // ABI fragments needed by the agent tools. Hand-curated from TreasuryVault.sol
-// and IERC3643.sol - keep in sync if those contract surfaces change.
+// (plus ERC-20 balanceOf and the token errors) - keep in sync if the vault changes.
 
 export const VAULT_ABI = [
   {
@@ -11,7 +11,11 @@ export const VAULT_ABI = [
       { name: "to", type: "address" },
       { name: "amount", type: "uint256" },
     ],
-    outputs: [],
+    outputs: [
+      { name: "executed", type: "bool" },
+      { name: "reason", type: "uint8" },
+      { name: "detail", type: "bytes" },
+    ],
   },
   {
     type: "function",
@@ -100,6 +104,21 @@ export const VAULT_ABI = [
   },
   {
     type: "error",
+    name: "ZeroAmount",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "TokenTransferFailedWithoutReason",
+    inputs: [{ name: "token", type: "address" }],
+  },
+  {
+    type: "error",
+    name: "ReentrancyGuardReentrantCall",
+    inputs: [],
+  },
+  {
+    type: "error",
     name: "AccessControlUnauthorizedAccount",
     inputs: [
       { name: "account", type: "address" },
@@ -119,7 +138,8 @@ export const IERC3643_ABI = [
 ] as const;
 
 // Errors an ERC-3643 (T-REX v5) token reverts with on transfer. The vault catches
-// the revert and forwards the raw bytes as `detail` in TransferRejected; this ABI
+// the revert and forwards the raw bytes as `detail` in TransferRejected and in its
+// return value; this ABI
 // lets the agent decode them. Error(string) and Panic(uint256) are built into viem.
 export const TOKEN_ERRORS_ABI = [
   { type: "error", name: "UnverifiedIdentity", inputs: [] },
@@ -142,7 +162,7 @@ export const TOKEN_ERRORS_ABI = [
 ] as const;
 
 // Mirrors the RejectReason enum in TreasuryVault.sol. Index = uint8 value emitted
-// in the TransferRejected event.
+// in the TransferRejected event and returned by executeTransfer.
 export const REJECT_REASON = [
   "None",
   "AssetNotAllowed",

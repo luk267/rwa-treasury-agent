@@ -96,8 +96,10 @@ contract TreasuryVaultAssetCapTest is Test {
         MockERC3643 unknown = _newFundedToken();
 
         _expectRejected(address(unknown), cp1, 100e18, TreasuryVault.RejectReason.AssetNotAllowed);
-        vault.executeTransfer(address(unknown), cp1, 100e18);
+        (bool executed, TreasuryVault.RejectReason reason,) = vault.executeTransfer(address(unknown), cp1, 100e18);
 
+        assertFalse(executed);
+        assertEq(uint8(reason), uint8(TreasuryVault.RejectReason.AssetNotAllowed));
         assertEq(unknown.balanceOf(cp1), 0);
     }
 
@@ -164,8 +166,10 @@ contract TreasuryVaultAssetCapTest is Test {
 
         // 3000 to cp2 - rejected (3000 + 3000 = 6000 > 5000 cap)
         _expectRejected(address(token), cp2, 3000e18, TreasuryVault.RejectReason.AssetDailyCapExceeded);
-        vault.executeTransfer(address(token), cp2, 3000e18);
+        (bool executed, TreasuryVault.RejectReason reason,) = vault.executeTransfer(address(token), cp2, 3000e18);
 
+        assertFalse(executed);
+        assertEq(uint8(reason), uint8(TreasuryVault.RejectReason.AssetDailyCapExceeded));
         assertEq(token.balanceOf(cp1), 3000e18);
         assertEq(token.balanceOf(cp2), 0);
     }

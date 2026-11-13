@@ -4,6 +4,7 @@ pragma solidity 0.8.38;
 import {
     AccessControlDefaultAdminRules
 } from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
+import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import { IERC3643 } from "./interfaces/IERC3643.sol";
 
 /// @title TreasuryVault
@@ -23,7 +24,7 @@ import { IERC3643 } from "./interfaces/IERC3643.sol";
 ///      The admin role follows OpenZeppelin's AccessControlDefaultAdminRules: a single
 ///      admin, handed over in two steps with a delay. A multisig admin and SafeERC20
 ///      are out of scope for this reference implementation.
-contract TreasuryVault is AccessControlDefaultAdminRules {
+contract TreasuryVault is AccessControlDefaultAdminRules, ReentrancyGuardTransient {
     struct AssetConfig {
         bool allowed;
         uint256 dailyOutflowCap;
@@ -70,6 +71,8 @@ contract TreasuryVault is AccessControlDefaultAdminRules {
     error CounterpartyAlreadyActive();
     error CounterpartyNotActive();
     error ZeroAddress();
+    error ZeroAmount();
+    error TokenTransferFailedWithoutReason(address token);
 
     /// @notice Assigns each role to the account passed in. The deployer gets no role
     ///         unless it is passed explicitly.
@@ -118,62 +121,70 @@ contract TreasuryVault is AccessControlDefaultAdminRules {
     }
 
     /// @notice Execute a token transfer through the vault's policy gate.
-    /// @dev Check order: role → pause → token allowed → counterparty active →
-    ///      daily cap per counterparty and token → daily outflow cap per token →
-    ///      token.transfer(). A missing role or a paused vault reverts. A policy
-    ///      rejection (gates 1-5) emits TransferRejected and returns without reverting,
-    ///      so it stays in the log with a typed reason.
+    /// @dev Check order: re-entrancy → role → pause → amount → token allowed →
+    ///      counterparty active → daily cap per counterparty and token →
+    ///      daily outflow cap per token → token.transfer(). A missing role, a paused
+    ///      vault, a re-entrant call or a zero amount reverts. A policy rejection
+    ///      (gates 1-5) emits TransferRejected and returns the same values without
+    ///      reverting, so it stays in the log with a typed reason. A token that fails
+    ///      without giving a reason (empty revert data, which includes running out of
+    ///      gas, or a `false` return) reverts with TokenTransferFailedWithoutReason.
     ///      See docs/adr/0001-emit-instead-of-revert.md.
     /// @param token The ERC-3643 token to transfer.
     /// @param to The recipient counterparty.
-    /// @param amount The token amount.
+    /// @param amount The token amount. Must not be zero.
+    /// @return executed True if the tokens moved and TransferExecuted was emitted.
+    /// @return reason The gate that refused the transfer, or None if it was executed.
+    /// @return detail For ERC3643Compliance, the token's revert data; empty otherwise.
     // `token` must be allowed by the treasurer (gate 1) before anything is written for it.
     // forge-lint: disable-next-line(missing-zero-check)
-    function executeTransfer(address token, address to, uint256 amount) external onlyRole(AGENT_ROLE) whenNotPaused {
+    function executeTransfer(address token, address to, uint256 amount)
+        external
+        nonReentrant
+        onlyRole(AGENT_ROLE)
+        whenNotPaused
+        returns (bool executed, RejectReason reason, bytes memory detail)
+    {
+        if (amount == 0) revert ZeroAmount();
+
         // Gate 1: Token allowlist
         AssetConfig memory asset = _assets[token];
-        if (!asset.allowed) {
-            emit TransferRejected(token, to, amount, RejectReason.AssetNotAllowed, "");
-            return;
-        }
+        if (!asset.allowed) return _reject(token, to, amount, RejectReason.AssetNotAllowed, "");
 
         // Gate 2: Counterparty whitelist
-        if (!_counterparties[to].active) {
-            emit TransferRejected(token, to, amount, RejectReason.NotWhitelisted, "");
-            return;
-        }
+        if (!_counterparties[to].active) return _reject(token, to, amount, RejectReason.NotWhitelisted, "");
 
         // Gate 3: Daily cap per counterparty and token
         uint256 dayBucket = block.timestamp / 1 days;
         uint256 spent = _dailySpent[to][token][dayBucket];
         if (_exceedsCap(spent, amount, _counterpartyDailyCaps[to][token])) {
-            emit TransferRejected(token, to, amount, RejectReason.DailyCapExceeded, "");
-            return;
+            return _reject(token, to, amount, RejectReason.DailyCapExceeded, "");
         }
 
         // Gate 4: Daily outflow cap per token, summed over all counterparties
         uint256 assetSpent = _assetDailySpent[token][dayBucket];
         if (_exceedsCap(assetSpent, amount, asset.dailyOutflowCap)) {
-            emit TransferRejected(token, to, amount, RejectReason.AssetDailyCapExceeded, "");
-            return;
+            return _reject(token, to, amount, RejectReason.AssetDailyCapExceeded, "");
         }
 
         // Gate 5: ERC-3643 compliance (identity + token-level rules)
         // Counters are written after the call on purpose: a rejected transfer must not consume a cap.
-        // Re-entry would need AGENT_ROLE, since every state-changing function is role-gated.
-        // The events report the token's result, so they can only follow the call.
+        // This breaks checks-effects-interactions, so nonReentrant blocks any call back into
+        // executeTransfer while the token runs. The events report the token's result, so they
+        // can only follow the call.
         // Gates 3 and 4 guarantee spent + amount <= cap, so the additions below cannot overflow.
         // forge-lint: disable-start(reentrancy-no-eth, reentrancy-events)
         try IERC3643(token).transfer(to, amount) returns (bool success) {
-            if (!success) {
-                emit TransferRejected(token, to, amount, RejectReason.ERC3643Compliance, "");
-                return;
-            }
+            if (!success) revert TokenTransferFailedWithoutReason(token);
             _dailySpent[to][token][dayBucket] = spent + amount;
             _assetDailySpent[token][dayBucket] = assetSpent + amount;
             emit TransferExecuted(token, to, amount, msg.sender);
-        } catch (bytes memory reason) {
-            emit TransferRejected(token, to, amount, RejectReason.ERC3643Compliance, reason);
+            return (true, RejectReason.None, "");
+        } catch (bytes memory tokenError) {
+            // No data means no decision: an out-of-gas in the token lands here too (EIP-150
+            // leaves the vault 1/64 of the gas). Only a reason from the token is logged.
+            if (tokenError.length == 0) revert TokenTransferFailedWithoutReason(token);
+            return _reject(token, to, amount, RejectReason.ERC3643Compliance, tokenError);
         }
         // forge-lint: disable-end(reentrancy-no-eth, reentrancy-events)
     }
@@ -263,6 +274,18 @@ contract TreasuryVault is AccessControlDefaultAdminRules {
     /// @return The amount transferred today (UTC day bucket).
     function assetSpentToday(address token) external view returns (uint256) {
         return _assetDailySpent[token][block.timestamp / 1 days];
+    }
+
+    /// @dev Emit TransferRejected and return the same values, so the event and the return value
+    ///      of executeTransfer always agree.
+    function _reject(address token, address to, uint256 amount, RejectReason reason, bytes memory detail)
+        private
+        returns (bool, RejectReason, bytes memory)
+    {
+        // Gate 5 calls this after token.transfer; nonReentrant on executeTransfer covers it.
+        // forge-lint: disable-next-line(reentrancy-events)
+        emit TransferRejected(token, to, amount, reason, detail);
+        return (false, reason, detail);
     }
 
     /// @dev True if `amount` does not fit into what is left of `cap`. Written so that it cannot

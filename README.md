@@ -101,7 +101,7 @@ flowchart LR
     CP["Counterparty"]
     Log[("Event log<br/>TransferRejected / TransferExecuted")]
 
-    Agent -->|"simulate (no transaction)"| Vault
+    Agent -->|"eth_call (dry run, no transaction)"| Vault
     Agent -->|"executeTransfer"| Vault
     Gates -->|"token.transfer (try/catch)"| Token
     Token --> CP
@@ -110,8 +110,9 @@ flowchart LR
 
 The vault follows one rule for refusals:
 
-- **Authorization reverts.** A caller without `AGENT_ROLE`, or any call while
-  the vault is paused, reverts. The caller had no right to ask.
+- **Authorization reverts.** A caller without `AGENT_ROLE`, any call while
+  the vault is paused, and an amount of 0 revert. The caller had no right to
+  ask.
 - **Policy decisions are logged.** Five gates run in order. A refusal emits
   `TransferRejected(token, to, amount, reason, detail)`, and the transaction
   still succeeds:
@@ -120,7 +121,13 @@ The vault follows one rule for refusals:
   3. Daily cap per counterparty and token (vault)
   4. Daily outflow cap per token, over all counterparties (vault)
   5. ERC-3643 compliance (token). The vault calls `token.transfer` in
-     try/catch and keeps the token's revert data in `detail`.
+     try/catch and keeps the token's revert data in `detail`. A token that
+     fails without a reason (no revert data, which includes running out of
+     gas, or `false`) makes the vault revert: that is not a policy decision.
+
+`executeTransfer` returns the same outcome as
+`(bool executed, RejectReason reason, bytes detail)`, so a calling contract
+does not have to read logs.
 
 The vault's gates are default-deny: an unknown token, an unknown recipient or
 a cap that was never set blocks the transfer. "Unlimited" has to be set
@@ -151,10 +158,12 @@ records:
 - **Counters update on success only.** `_dailySpent` and `_assetDailySpent`
   are written after `token.transfer` returns true. A rejected ERC-3643 call
   leaves the counters untouched (verified by
-  `test_executeTransfer_erc3643Rejects_dailyCapNotConsumed`).
-- **The simulation explains, it does not protect.** The agent simulates every
-  transfer without sending a transaction, so it can tell the operator which
-  gate would refuse. That is an aid for the operator and the model, not a
+  `test_executeTransfer_erc3643Rejects_dailyCapNotConsumed`). Because the
+  write follows the external call, `executeTransfer` has a re-entrancy guard
+  (verified by `test_executeTransfer_reentrantToken_cannotBypassCaps`).
+- **The pre-check explains, it does not protect.** The agent runs every
+  transfer as an `eth_call` first and reads the return value, so it can tell
+  the operator which gate would refuse. That is an aid for the operator and the model, not a
   control: on submission the vault runs every check again. The same holds for
   the `Proceed? [y/N]` prompt before each real transfer.
 
@@ -218,6 +227,7 @@ contracts/
   src/interfaces/IERC3643.sol   minimal T-REX interface
   test/unit/                    unit tests, one suite per concern
   test/mocks/MockERC3643.sol    T-REX v5-style test double: identity, freeze, pause, forced transfer
+  test/mocks/                   plus small tokens that fail without a reason, burn gas or re-enter
   script/DeployLocal.s.sol      local Anvil deployment
 
 agent/
@@ -258,6 +268,7 @@ The suites cover the vault's gates, the role split and the ERC-3643 integration:
 | `TreasuryVault.AssetCap.t.sol`          | Token allowlist, daily outflow cap per token  |
 | `TreasuryVault.ERC3643Compliance.t.sol` | try/catch on the token's compliance check     |
 | `TreasuryVault.IssuerRights.t.sol`      | Token-side rejections, issuer forced transfer |
+| `TreasuryVault.ExecutionPath.t.sol`     | Zero amount, token without a reason, out-of-gas, re-entrancy |
 
 The agent's decoder tests run with `cd agent && npm test`.
 

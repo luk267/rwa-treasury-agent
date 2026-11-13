@@ -1,8 +1,6 @@
 import {
   BaseError,
   ContractFunctionRevertedError,
-  decodeEventLog,
-  encodeFunctionData,
   type Account,
   type PublicClient,
 } from "viem";
@@ -43,16 +41,19 @@ export function createCheckTransferTool(
         const recipient = resolveCounterparty(deployment, to);
         const amountWei = parseAmount(amount, tokenInfo);
 
-        // Phase 1: hard-revert detection via simulateContract (eth_call).
-        // Throws ContractFunctionRevertedError on revert; no logs returned.
+        // One eth_call runs the same code as the real transaction. executeTransfer
+        // returns its outcome, so no event logs are needed. A missing role, a paused
+        // vault or invalid input reverts and throws ContractFunctionRevertedError.
+        let outcome: readonly [boolean, number, `0x${string}`];
         try {
-          await publicClient.simulateContract({
+          const { result } = await publicClient.simulateContract({
             account,
             address: deployment.vault,
             abi: VAULT_ABI,
             functionName: "executeTransfer",
             args: [tokenInfo.address, recipient, amountWei],
           });
+          outcome = result;
         } catch (err) {
           if (err instanceof BaseError) {
             const reverted = err.walk(
@@ -66,52 +67,9 @@ export function createCheckTransferTool(
           throw err;
         }
 
-        // Phase 2: event-log inspection via simulateCalls (eth_simulateV1).
-        // simulateContract returned no revert, so the call would succeed -
-        // but the vault may emit TransferRejected instead of TransferExecuted.
-        const calldata = encodeFunctionData({
-          abi: VAULT_ABI,
-          functionName: "executeTransfer",
-          args: [tokenInfo.address, recipient, amountWei],
-        });
-
-        const { results } = await publicClient.simulateCalls({
-          account: account.address,
-          calls: [{ to: deployment.vault, data: calldata }],
-        });
-
-        const logs = results[0].logs ?? [];
-        for (const log of logs) {
-          let decoded;
-          try {
-            decoded = decodeEventLog({
-              abi: VAULT_ABI,
-              topics: log.topics,
-              data: log.data,
-            });
-          } catch {
-            continue; // foreign event (e.g. inner ERC-20 Transfer)
-          }
-          if (decoded.eventName === "TransferExecuted") {
-            return { feasible: true };
-          }
-          if (decoded.eventName === "TransferRejected") {
-            const args = decoded.args as {
-              reason: number;
-              detail: `0x${string}`;
-            };
-            return {
-              feasible: false,
-              ...describeRejection(Number(args.reason), args.detail),
-            };
-          }
-        }
-
-        return {
-          feasible: false,
-          reason: "UnknownOutcome",
-          detail: "Simulation succeeded but emitted no vault event.",
-        };
+        const [executed, reason, detail] = outcome;
+        if (executed) return { feasible: true };
+        return { feasible: false, ...describeRejection(reason, detail) };
       } catch (err) {
         return { feasible: false, ...toolError(err) };
       }

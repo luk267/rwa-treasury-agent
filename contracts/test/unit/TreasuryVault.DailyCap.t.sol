@@ -88,7 +88,12 @@ contract TreasuryVaultDailyCapTest is Test {
     function test_executeTransfer_underDailyCap_succeeds() external {
         vm.expectEmit();
         emit TransferExecuted(address(token), cp1, 500e18, address(this));
-        vault.executeTransfer(address(token), cp1, 500e18);
+        (bool executed, TreasuryVault.RejectReason reason, bytes memory detail) =
+            vault.executeTransfer(address(token), cp1, 500e18);
+
+        assertTrue(executed);
+        assertEq(uint8(reason), uint8(TreasuryVault.RejectReason.None));
+        assertEq(detail, "");
     }
 
     /// @dev Two transfers that together stay under the daily cap should both succeed.
@@ -107,7 +112,10 @@ contract TreasuryVaultDailyCapTest is Test {
         // Second transfer: 600 + 500 = 1100 > 1000 cap
         vm.expectEmit();
         emit TransferRejected(address(token), cp1, 500e18, TreasuryVault.RejectReason.DailyCapExceeded, "");
-        vault.executeTransfer(address(token), cp1, 500e18);
+        (bool executed, TreasuryVault.RejectReason reason,) = vault.executeTransfer(address(token), cp1, 500e18);
+
+        assertFalse(executed);
+        assertEq(uint8(reason), uint8(TreasuryVault.RejectReason.DailyCapExceeded));
 
         // Only the first 600 should have arrived
         assertEq(token.balanceOf(cp1), 600e18);

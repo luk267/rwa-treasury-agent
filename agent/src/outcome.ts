@@ -38,11 +38,12 @@ export interface Rejection {
   detail?: DecodedDetail;
 }
 
-/** Map the uint8 reason and the raw detail of a TransferRejected event to tool output. */
+/** Map the uint8 reason and the raw detail of a rejection (event or return value) to tool output. */
 export function describeRejection(reasonIndex: number, detail: Hex): Rejection {
   const reason = REJECT_REASON[reasonIndex] ?? `Reason${reasonIndex}`;
-  // Only the ERC-3643 gate forwards token data; the vault's own gates emit "".
-  if (reason === "ERC3643Compliance" || detail !== "0x") {
+  // Only the ERC-3643 gate forwards token data, and only when the token gave a reason:
+  // without one the vault reverts. The vault's own gates return "".
+  if (detail !== "0x") {
     return { reason, detail: decodeDetail(detail) };
   }
   return { reason };

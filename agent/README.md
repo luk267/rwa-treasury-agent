@@ -8,7 +8,7 @@ plain language.
 ## Stack
 
 - [viem](https://viem.sh) - Ethereum client (`simulateContract`,
-  `simulateCalls`, `writeContract`)
+  `writeContract`)
 - [`@anthropic-ai/sdk`](https://www.npmjs.com/package/@anthropic-ai/sdk) -
   Claude Messages API client (no beta features)
 - [zod](https://zod.dev) - tool input schemas, also turned into the JSON
@@ -25,7 +25,7 @@ The model sees three tools:
 | Tool                         | Effect                                                              |
 | ---------------------------- | ------------------------------------------------------------------- |
 | `get_portfolio`              | Read balances, token config, caps and today's usage from the chain. |
-| `check_transfer_feasibility` | Two-phase off-chain simulation (no transaction). See below.         |
+| `check_transfer_feasibility` | One `eth_call` of `executeTransfer` (no transaction). See below.    |
 | `execute_transfer`           | `writeContract` + receipt parsing. Returns the decoded vault event. |
 
 The system prompt ([`src/prompt.ts`](src/prompt.ts)) requires the model to
@@ -68,7 +68,8 @@ compliance check are what actually stop a bad transfer.
 ### Readable rejection reasons
 
 When the token itself refuses a transfer, the vault forwards the token's
-revert data as `detail` in `TransferRejected`. [`src/outcome.ts`](src/outcome.ts)
+revert data as `detail` in `TransferRejected` and in its return value.
+[`src/outcome.ts`](src/outcome.ts)
 decodes it with viem against the T-REX v5 errors (`UnverifiedIdentity`,
 `ComplianceNotFollowed`, `FrozenWallet`, `EnforcedPause`,
 `ERC20InsufficientBalance`) plus `Error(string)` and `Panic`:
@@ -81,27 +82,32 @@ decodes it with viem against the T-REX v5 errors (`UnverifiedIdentity`,
 }
 ```
 
-Empty data or an unknown selector gives `"decoded": null` and a `note`.
+An unknown selector gives `"decoded": null` and a `note`. Empty data does
+not reach the agent: when the token gives no reason, the vault reverts with
+`TokenTransferFailedWithoutReason`.
 
-### Two-phase simulation
+### Pre-check
 
-`check_transfer_feasibility` mirrors the vault's own design choice (emit
-don't revert) on the off-chain side. Some failures revert, others emit a
-`TransferRejected` event:
+`check_transfer_feasibility` calls `executeTransfer` once with
+`simulateContract`, a plain `eth_call`. The vault returns
+`(bool executed, RejectReason reason, bytes detail)`, the same values it
+emits in its events, so no logs are needed. Some failures revert, others are
+returned as a rejection:
 
 | Failure mode                                       | How it surfaces                |
 | -------------------------------------------------- | ------------------------------ |
-| `VaultPaused`, `AccessControlUnauthorizedAccount`  | Hard revert                    |
-| `AssetNotAllowed`, `NotWhitelisted`                | `TransferRejected` event       |
-| `DailyCapExceeded`, `AssetDailyCapExceeded`        | `TransferRejected` event       |
-| `ERC3643Compliance`                                | `TransferRejected` event       |
+| `VaultPaused`, `AccessControlUnauthorizedAccount`  | Revert                         |
+| `ZeroAmount`, `TokenTransferFailedWithoutReason`   | Revert                         |
+| `AssetNotAllowed`, `NotWhitelisted`                | Return value (`executed: false`) |
+| `DailyCapExceeded`, `AssetDailyCapExceeded`        | Return value (`executed: false`) |
+| `ERC3643Compliance`                                | Return value, token error in `detail` |
 
-The tool runs `simulateContract` first to catch any revert, then
-`simulateCalls` to decode the event log. The model therefore sees the same
+A revert is reported by its error name. The model therefore sees the same
 outcome an on-chain submission would produce - including which gate would
-have rejected it.
+have rejected it. `execute_transfer` gets no return value from a mined
+transaction, so it reads the vault's event from the receipt.
 
-The simulation is an aid for the model and the operator, not a control.
+The pre-check is an aid for the model and the operator, not a control.
 `execute_transfer` sends a real transaction, and the vault runs every check
 again.
 
@@ -178,6 +184,6 @@ src/
   tools/
     types.ts                     VaultTool interface, shared input schema, error naming
     get-portfolio.ts             balances, token config, caps and today's usage, read from the vault
-    check-transfer.ts            two-phase simulation
+    check-transfer.ts            pre-check: one eth_call, decodes the return value
     execute-transfer.ts          writeContract + receipt event decoding
 ```
