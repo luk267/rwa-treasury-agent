@@ -9,9 +9,10 @@ cap) run before the token's own ERC-3643 compliance layer makes the final
 call. If the agent hallucinates or gets manipulated, the contract blocks the
 move at the gate layer.
 
-The agent (TypeScript, Claude Agent SDK + viem) wraps the vault as an MCP
-server with three tools - read holdings, simulate a transfer, submit one -
-and is required by its system prompt to simulate before executing. The
+The agent (TypeScript, Anthropic SDK + viem) runs its own short tool loop over
+the Claude Messages API with three tools - read holdings, simulate a
+transfer, submit one. Its system prompt requires it to simulate before
+executing, and it asks the operator before every real transfer. The
 reasoning it emits off-chain is observability, not authorization.
 
 ---
@@ -19,7 +20,7 @@ reasoning it emits off-chain is observability, not authorization.
 ## Status
 
 The vault and policy gates are complete (53 unit tests across 7 suites). The
-agent runtime is wired up against a local Anvil stack with all three MCP
+agent runtime is wired up against a local Anvil stack with all three
 tools functional. Sepolia config is the next step.
 
 Not audited. Not for production use.
@@ -34,7 +35,7 @@ enforces identity-level compliance.
 
 ```mermaid
 flowchart LR
-    Agent["AI Agent<br/>TypeScript, Claude SDK + viem"]
+    Agent["AI Agent<br/>TypeScript, Claude API + viem"]
     subgraph Vault["TreasuryVault (Solidity, AccessControl)"]
         Gates["① pause → ② whitelist →<br/>③ daily cap → ④ exposure cap"]
     end
@@ -106,7 +107,8 @@ Agent (with the local stack running):
 cd agent && npm install
 cp ../.env.example .env        # then set ANTHROPIC_API_KEY
 npm start "show the vault holdings"
-npm start "transfer 500 MOCK to cp1"
+npm start "transfer 500 MOCK to cp1"          # asks "Proceed? [y/N]" before sending
+npm start -- --yes "transfer 100 MOCK to cp3"  # rejected by the token: unverified identity
 ```
 
 See [`agent/README.md`](agent/README.md) for the agent details.
@@ -119,8 +121,8 @@ See [`agent/README.md`](agent/README.md) for the agent details.
 | --------- | --------------------------------------------------------------------- |
 | Contracts | Solidity 0.8.38, Foundry 1.9.0, OpenZeppelin `AccessControl`          |
 | Token     | ERC-3643 (T-REX) interface; `MockERC3643` for local tests             |
-| Agent     | TypeScript (strict), Node 22+, viem, `@anthropic-ai/claude-agent-sdk` |
-| CI        | GitHub Actions: `forge fmt`, `lint`, `build`, `test`; `tsc --noEmit`  |
+| Agent     | TypeScript (strict), Node 22+, viem, `@anthropic-ai/sdk`, zod         |
+| CI        | GitHub Actions: `forge` fmt, lint, build, test; `tsc`, `npm test`     |
 
 ---
 
@@ -135,7 +137,9 @@ contracts/
   script/DeployLocal.s.sol      local Anvil deployment
 
 agent/
-  src/index.ts                  MCP server + Claude Agent SDK query loop
+  src/index.ts                  entry point: setup, operator prompt, exit codes
+  src/loop.ts                   tool loop over the Claude Messages API
+  src/outcome.ts                decodes the token's revert data in TransferRejected
   src/tools/                    get_portfolio, check_transfer_feasibility, execute_transfer
   src/prompt.ts                 system prompt: simulate-before-execute, reject-reason mapping
 

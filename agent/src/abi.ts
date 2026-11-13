@@ -59,6 +59,29 @@ export const IERC3643_ABI = [
   },
 ] as const;
 
+// Errors an ERC-3643 (T-REX v5) token reverts with on transfer. The vault catches
+// the revert and forwards the raw bytes as `detail` in TransferRejected; this ABI
+// lets the agent decode them. Error(string) and Panic(uint256) are built into viem.
+export const TOKEN_ERRORS_ABI = [
+  { type: "error", name: "UnverifiedIdentity", inputs: [] },
+  { type: "error", name: "ComplianceNotFollowed", inputs: [] },
+  {
+    type: "error",
+    name: "FrozenWallet",
+    inputs: [{ name: "wallet", type: "address" }],
+  },
+  { type: "error", name: "EnforcedPause", inputs: [] },
+  {
+    type: "error",
+    name: "ERC20InsufficientBalance",
+    inputs: [
+      { name: "sender", type: "address" },
+      { name: "balance", type: "uint256" },
+      { name: "needed", type: "uint256" },
+    ],
+  },
+] as const;
+
 // Mirrors the RejectReason enum in TreasuryVault.sol. Index = uint8 value emitted
 // in the TransferRejected event.
 export const REJECT_REASON = [

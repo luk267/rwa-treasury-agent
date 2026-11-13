@@ -1,17 +1,26 @@
-import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { formatUnits, type PublicClient } from "viem";
+import { z } from "zod";
 import { IERC3643_ABI } from "../abi.js";
 import type { Deployment } from "../config.js";
+import { inputSchema, type VaultTool } from "./types.js";
+
+const noInput = z.object({});
 
 export function createGetPortfolioTool(
   deployment: Deployment,
   publicClient: PublicClient,
-) {
-  return tool(
-    "get_portfolio",
-    "Read the current token holdings of the treasury vault. Returns each token with its address, symbol, and balance in human-readable form (not wei).",
-    {},
-    async () => {
+): VaultTool<z.infer<typeof noInput>> {
+  return {
+    definition: {
+      name: "get_portfolio",
+      description:
+        "Read the current token holdings of the treasury vault. Returns each token with its address, symbol, and balance in human-readable form (not wei).",
+      input_schema: inputSchema(noInput),
+      strict: true,
+    },
+    parse: (input) => noInput.parse(input),
+    requiresApproval: false,
+    async run() {
       const holdings = await Promise.all(
         deployment.tokens.map(async (token) => {
           const balanceWei = await publicClient.readContract({
@@ -28,14 +37,7 @@ export function createGetPortfolioTool(
         }),
       );
 
-      const payload = {
-        vault: deployment.vault,
-        holdings,
-      };
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
-      };
+      return { vault: deployment.vault, holdings };
     },
-  );
+  };
 }

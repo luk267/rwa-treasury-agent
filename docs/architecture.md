@@ -29,7 +29,7 @@ say - even a vault-approved transfer can be blocked by ERC-3643 compliance.
 | `TreasuryVault.sol`       | Holds ERC-3643 tokens. Enforces four policy gates. Calls the token's `transfer` and surfaces the outcome as an event.      | `contracts/src/`               |
 | `IERC3643.sol`            | Minimal interface used by the vault - `transfer`, `transferFrom`, `balanceOf`. Intentionally narrow.                       | `contracts/src/interfaces/`    |
 | `MockERC3643.sol`         | Test double modelled on T-REX v5: checks pause, freeze, balance, recipient identity and compliance in that order and reverts with the v5 error names. Its deployer is the issuer agent: verifies wallets, freezes, pauses, forces transfers. | `contracts/test/mocks/`        |
-| TypeScript agent          | MCP server exposing three tools to a Claude model (read holdings, simulate, submit). System prompt requires simulate before execute and maps `RejectReason` back to plain language. | `agent/src/` |
+| TypeScript agent          | Own tool loop over the Claude Messages API with three tools (read holdings, simulate, submit). Asks the operator before a real transfer. System prompt requires simulate before execute and maps `RejectReason` and the decoded token error back to plain language. | `agent/src/` |
 | `DeployLocal.s.sol`       | Foundry script: deploys both contracts, verifies the vault, `cp1` and `cp2` in the token, funds the vault, whitelists three counterparties, sets an exposure cap. | `contracts/script/`            |
 | `scripts/local-dev.sh`    | Starts Anvil, runs the deploy script, parses output, writes `deployments/local.json`.                                      | `scripts/`                     |
 
@@ -151,6 +151,7 @@ real T-REX deployment.
 | Component                       | Trusted to                                                             | Not trusted to                                        |
 | ------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
 | Agent (TypeScript)              | Propose a transfer, simulate it, explain the resulting event.          | Choose recipients, choose amounts, bypass any gate.   |
+| Operator prompt (`Proceed? [y/N]`) | Let a human stop a transfer before it is sent.                      | Act as a security boundary: the agent key can call the vault directly, so the gates must hold on their own. |
 | `TreasuryVault.sol`             | Apply gates 1–4 in order. Emit a faithful outcome event.               | Decide jurisdiction / KYC / transfer-rule compliance. |
 | ERC-3643 token                  | Final compliance decision (identity, claims, transfer rules).          | Provide reasoning suitable for off-chain explanation. |
 | Admin / Treasurer / Pauser keys | Hold role management, the configuration authority and the kill-switch. | (Out of scope for this PoC - assumed non-malicious.)  |
@@ -192,6 +193,8 @@ which is to validate the three-layer policy + agent integration.
 | Counters-not-consumed-on-reject test                 | [`contracts/test/unit/TreasuryVault.ERC3643Compliance.t.sol`](../contracts/test/unit/TreasuryVault.ERC3643Compliance.t.sol)     |
 | Local deployment script                              | [`contracts/script/DeployLocal.s.sol`](../contracts/script/DeployLocal.s.sol)                                                   |
 | Anvil bootstrap + deployment-info writer             | [`scripts/local-dev.sh`](../scripts/local-dev.sh)                                                                               |
-| MCP server entry point + query loop                  | [`agent/src/index.ts`](../agent/src/index.ts)                                                                                   |
+| Agent entry point: pre-flight checks, exit codes     | [`agent/src/index.ts`](../agent/src/index.ts)                                                                                   |
+| Tool loop over the Claude Messages API               | [`agent/src/loop.ts`](../agent/src/loop.ts)                                                                                     |
+| Decoding the token's revert data in `detail`         | [`agent/src/outcome.ts`](../agent/src/outcome.ts)                                                                               |
 | Two-phase simulation (revert + event logs)           | [`agent/src/tools/check-transfer.ts`](../agent/src/tools/check-transfer.ts)                                                     |
 | System prompt with policy rules                      | [`agent/src/prompt.ts`](../agent/src/prompt.ts)                                                                                 |
