@@ -97,6 +97,12 @@ contract TreasuryVaultRolesTest is Test {
         vault.addCounterparty(makeAddr("attacker"));
     }
 
+    function test_agent_cannotDeactivateCounterparty() external {
+        _expectUnauthorized(agent, TREASURER_ROLE);
+        vm.prank(agent);
+        vault.deactivateCounterparty(cp1);
+    }
+
     function test_agent_cannotSetAssetConfig() external {
         _expectUnauthorized(agent, TREASURER_ROLE);
         vm.prank(agent);
@@ -113,6 +119,18 @@ contract TreasuryVaultRolesTest is Test {
         _expectUnauthorized(agent, PAUSER_ROLE);
         vm.prank(agent);
         vault.pause();
+    }
+
+    /// @dev Pause is the kill-switch. The key it is meant to stop must not be able to undo it.
+    function test_agent_cannotUnpause() external {
+        vm.prank(pauser);
+        vault.pause();
+
+        _expectUnauthorized(agent, PAUSER_ROLE);
+        vm.prank(agent);
+        vault.unpause();
+
+        assertTrue(vault.paused(), "vault must stay paused");
     }
 
     function test_agent_cannotGrantRole() external {
@@ -155,6 +173,28 @@ contract TreasuryVaultRolesTest is Test {
         vm.expectRevert(IAccessControlDefaultAdminRules.AccessControlEnforcedDefaultAdminRules.selector);
         vm.prank(admin);
         vault.grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
+    }
+
+    /// @dev Documents a limit, not a mitigation. The handover delay protects the admin role
+    ///      itself. Granting the other roles takes effect at once, so the admin key alone can
+    ///      set the policy and use it, without any warp. Only the token's identity check
+    ///      remains: the recipient must be verified by the issuer.
+    function test_admin_canTakeTreasurerAndAgentRoleWithoutDelay() external {
+        address recipient = makeAddr("recipient");
+        token.setVerified(recipient, true);
+        uint256 balance = token.balanceOf(address(vault));
+
+        vm.startPrank(admin);
+        vault.grantRole(TREASURER_ROLE, admin);
+        vault.grantRole(AGENT_ROLE, admin);
+        vault.addCounterparty(recipient);
+        vault.setCounterpartyDailyCap(recipient, address(token), type(uint256).max);
+        (bool executed,,) = vault.executeTransfer(address(token), recipient, balance);
+        vm.stopPrank();
+
+        assertTrue(executed);
+        assertEq(token.balanceOf(recipient), balance);
+        assertEq(token.balanceOf(address(vault)), 0);
     }
 
     function test_adminTransfer_needsTwoStepsAndDelay() external {

@@ -113,6 +113,18 @@ contract TreasuryVaultAssetCapTest is Test {
         assertEq(token.balanceOf(cp1), 0);
     }
 
+    /// @dev Gate order: an unknown token and an unknown recipient fail gates 1 and 2 at once.
+    ///      The vault reports the first one, so a later reason always means the earlier gates passed.
+    function test_executeTransfer_unknownTokenAndUnknownRecipient_emitsAssetNotAllowed() external {
+        address unknownToken = makeAddr("unknown-token");
+
+        _expectRejected(unknownToken, alice, 100e18, TreasuryVault.RejectReason.AssetNotAllowed);
+        (bool executed, TreasuryVault.RejectReason reason,) = vault.executeTransfer(unknownToken, alice, 100e18);
+
+        assertFalse(executed);
+        assertEq(uint8(reason), uint8(TreasuryVault.RejectReason.AssetNotAllowed));
+    }
+
     /// @dev Regression for a fake token: before the allowlist, any contract whose `transfer`
     ///      returned true passed every gate and used up the counterparty's daily cap.
     function test_executeTransfer_foreignToken_doesNotConsumeCaps() external {

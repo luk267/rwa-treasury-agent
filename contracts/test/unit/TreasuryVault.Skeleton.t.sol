@@ -62,10 +62,32 @@ contract TreasuryVaultSkeletonTest is Test {
         vault.unpause();
     }
 
+    function test_unpause_byNonPauser_reverts() external {
+        vault.pause();
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, PAUSER_ROLE)
+        );
+        vault.unpause();
+    }
+
     function test_executeTransfer_whenPaused_reverts() external {
         vault.pause();
         vm.expectRevert(VaultPaused.selector);
         vault.executeTransfer(address(token), alice, 100);
+    }
+
+    /// @dev Pause is reversible: after unpause the same call goes through again.
+    function test_executeTransfer_afterUnpause_succeeds() external {
+        vault.pause();
+        assertTrue(vault.paused(), "should be paused");
+        vault.unpause();
+        assertFalse(vault.paused(), "should be unpaused");
+
+        vm.expectEmit(address(vault));
+        emit TransferExecuted(address(token), alice, 100, address(this));
+        vault.executeTransfer(address(token), alice, 100);
+        assertEq(token.balanceOf(alice), 100);
     }
 
     function test_executeTransfer_whenUnpaused_succeeds() external {

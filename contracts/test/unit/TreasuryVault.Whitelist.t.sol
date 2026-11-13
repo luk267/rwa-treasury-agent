@@ -101,6 +101,27 @@ contract TreasuryVaultWhitelistTest is Test {
         assertEq(vault.getCounterpartyDailyCap(cp1, address(token)), DAILY_CAP, "dailyCap should persist too");
     }
 
+    function test_deactivateCounterparty_byNonTreasurer_reverts() external {
+        vault.addCounterparty(cp1);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, TREASURER_ROLE)
+        );
+        vault.deactivateCounterparty(cp1);
+    }
+
+    /// @dev Only an active counterparty can be deactivated: not one that was never added,
+    ///      and not the same one twice.
+    function test_deactivateCounterparty_notActive_reverts() external {
+        vm.expectRevert(TreasuryVault.CounterpartyNotActive.selector);
+        vault.deactivateCounterparty(unknown);
+
+        vault.addCounterparty(cp1);
+        vault.deactivateCounterparty(cp1);
+        vm.expectRevert(TreasuryVault.CounterpartyNotActive.selector);
+        vault.deactivateCounterparty(cp1);
+    }
+
     /// @dev KEY TEST: vault must NOT revert on rejected transfer.
     ///      Agent reads the TransferRejected event off-chain to know what happened.
     function test_executeTransfer_toUnknownCounterparty_emitsRejected_noRevert() external {

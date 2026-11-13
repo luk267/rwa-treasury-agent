@@ -41,6 +41,11 @@ contract TreasuryVaultExecutionPathTest is Test {
 
         vm.expectRevert(TreasuryVault.ZeroAmount.selector);
         vault.executeTransfer(address(token), cp1, 0);
+
+        // "Before any gate runs": for a token and a recipient the vault does not know, gate 1
+        // would reject and return. The zero amount has to revert first.
+        vm.expectRevert(TreasuryVault.ZeroAmount.selector);
+        vault.executeTransfer(makeAddr("unknown-token"), makeAddr("stranger"), 0);
     }
 
     /// @dev A revert without data is not a compliance decision. It is also what an out-of-gas
