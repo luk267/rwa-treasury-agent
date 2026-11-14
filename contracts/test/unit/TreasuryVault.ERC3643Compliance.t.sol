@@ -39,7 +39,7 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
         // The token's revert data is the bare ComplianceNotFollowed() selector
         bytes memory expectedReason = abi.encodeWithSelector(MockERC3643.ComplianceNotFollowed.selector);
 
-        vm.expectEmit();
+        vm.expectEmit(address(vault));
         emit TransferRejected(address(token), cp1, 500e18, TreasuryVault.RejectReason.ERC3643Compliance, expectedReason);
         (bool executed, TreasuryVault.RejectReason reason, bytes memory detail) =
             vault.executeTransfer(address(token), cp1, 500e18);
@@ -81,7 +81,7 @@ contract TreasuryVaultERC3643ComplianceTest is Test {
     /// @dev A successful transfer after a previous success should still work
     ///      (sanity check that try/catch doesn't break the happy path).
     function test_executeTransfer_happyPath_stillWorks() external {
-        vm.expectEmit();
+        vm.expectEmit(address(vault));
         emit TransferExecuted(address(token), cp1, 500e18, address(this));
         vault.executeTransfer(address(token), cp1, 500e18);
 

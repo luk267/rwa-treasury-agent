@@ -42,7 +42,7 @@ contract TreasuryVaultSkeletonTest is Test {
     }
 
     function test_pause_byPauser_emitsEvent() external {
-        vm.expectEmit();
+        vm.expectEmit(address(vault));
         emit Paused(address(this));
         vault.pause();
     }
@@ -57,7 +57,7 @@ contract TreasuryVaultSkeletonTest is Test {
 
     function test_unpause_byPauser_emitsEvent() external {
         vault.pause();
-        vm.expectEmit();
+        vm.expectEmit(address(vault));
         emit Unpaused(address(this));
         vault.unpause();
     }
@@ -91,7 +91,7 @@ contract TreasuryVaultSkeletonTest is Test {
     }
 
     function test_executeTransfer_whenUnpaused_succeeds() external {
-        vm.expectEmit();
+        vm.expectEmit(address(vault));
         emit TransferExecuted(address(token), alice, 100, address(this));
         vault.executeTransfer(address(token), alice, 100);
         assertEq(token.balanceOf(alice), 100);

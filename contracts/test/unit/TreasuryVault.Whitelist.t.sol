@@ -35,7 +35,7 @@ contract TreasuryVaultWhitelistTest is Test {
     }
 
     function test_addCounterparty_byTreasurer_emitsAndStoresActive() external {
-        vm.expectEmit();
+        vm.expectEmit(address(vault));
         emit CounterpartyAdded(cp1);
         vault.addCounterparty(cp1);
 
@@ -84,7 +84,7 @@ contract TreasuryVaultWhitelistTest is Test {
 
     function test_deactivateCounterparty_setsInactive_emitsEvent() external {
         vault.addCounterparty(cp1);
-        vm.expectEmit();
+        vm.expectEmit(address(vault));
         emit CounterpartyDeactivated(cp1);
         vault.deactivateCounterparty(cp1);
         TreasuryVault.Counterparty memory cp = vault.getCounterparty(cp1);
@@ -125,7 +125,7 @@ contract TreasuryVaultWhitelistTest is Test {
     /// @dev KEY TEST: vault must NOT revert on rejected transfer.
     ///      Agent reads the TransferRejected event off-chain to know what happened.
     function test_executeTransfer_toUnknownCounterparty_emitsRejected_noRevert() external {
-        vm.expectEmit();
+        vm.expectEmit(address(vault));
         emit TransferRejected(address(token), unknown, 100, TreasuryVault.RejectReason.NotWhitelisted, "");
         (bool executed, TreasuryVault.RejectReason reason, bytes memory detail) =
             vault.executeTransfer(address(token), unknown, 100);
@@ -140,7 +140,7 @@ contract TreasuryVaultWhitelistTest is Test {
         vault.addCounterparty(cp1);
         vault.setCounterpartyDailyCap(cp1, address(token), DAILY_CAP);
         vault.deactivateCounterparty(cp1);
-        vm.expectEmit();
+        vm.expectEmit(address(vault));
         emit TransferRejected(address(token), cp1, 100, TreasuryVault.RejectReason.NotWhitelisted, "");
         vault.executeTransfer(address(token), cp1, 100);
     }
