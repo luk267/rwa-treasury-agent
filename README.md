@@ -236,11 +236,14 @@ records:
 
 ## Quick start
 
-Requires Foundry 1.9.0 and Node.js 22+. Start each terminal in the repo root.
+Requires Foundry 1.9.0 and Node.js 22+. After the clone, start each terminal
+in the repo root.
 
-Build and test the contracts:
+Clone the repo with its submodules, then build and test the contracts:
 
 ```bash
+git clone https://github.com/luk267/rwa-treasury-agent.git
+cd rwa-treasury-agent
 git submodule update --init --recursive
 (cd contracts && forge build && forge test)
 ```
