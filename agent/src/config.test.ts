@@ -2,14 +2,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { privateKeyToAccount } from "viem/accounts";
+import { sepolia } from "viem/chains";
 import {
   ConfigError,
   ToolInputError,
+  createClients,
   findToken,
   loadDeployment,
   parseAmount,
   resolveCounterparty,
+  resolveNetwork,
   type Deployment,
   type Token,
   type ToolInputErrorCode,
@@ -172,4 +177,118 @@ test("loadDeployment: wrong types are a ConfigError", () => {
   const tokens = [{ ...MOCK_TOKEN, decimals: "18" }];
   throwsConfig(() => loadFrom(JSON.stringify({ ...deployment, tokens })), /tokens\.0\.decimals/);
   throwsConfig(() => loadFrom("[]"), /invalid/);
+});
+
+test("loadDeployment: the hint names the network's own fix", () => {
+  throwsConfig(() => loadDeployment("/nonexistent/local.json"), /local-dev\.sh/);
+  throwsConfig(() => loadDeployment("/nonexistent/sepolia.json", "sepolia"), /restore it with git/);
+});
+
+test("loadDeployment reads a file without rpcUrl and with deployBlock", () => {
+  const { rpcUrl: _rpcUrl, ...rest } = deployment;
+  const withBlock = { ...rest, deployBlock: 12_345 };
+  assert.deepEqual(loadFrom(JSON.stringify(withBlock)), withBlock);
+  throwsConfig(() => loadFrom(JSON.stringify({ ...rest, deployBlock: -1 })), /deployBlock/);
+});
+
+// --- resolveNetwork ---
+
+test("resolveNetwork: unset or empty means local", () => {
+  assert.equal(resolveNetwork(undefined), "local");
+  assert.equal(resolveNetwork(""), "local");
+});
+
+test("resolveNetwork accepts local and sepolia", () => {
+  assert.equal(resolveNetwork("local"), "local");
+  assert.equal(resolveNetwork("sepolia"), "sepolia");
+});
+
+test("resolveNetwork refuses any other value and lists the allowed ones", () => {
+  throwsConfig(() => resolveNetwork("mainnet"), /local, sepolia/);
+  throwsConfig(() => resolveNetwork("Sepolia"), /local, sepolia/);
+});
+
+// --- createClients ---
+
+// Anvil account #9: a public test key, not a secret.
+const TEST_KEY = "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6";
+const TEST_AGENT = privateKeyToAccount(TEST_KEY).address;
+const TEST_RPC = "https://sepolia.example/v2/secret-provider-key";
+
+const { rpcUrl: _localRpc, ...withoutRpc } = deployment;
+const sepoliaDeployment: Deployment = {
+  ...withoutRpc,
+  chainId: sepolia.id,
+  deployBlock: 1,
+  roles: { ...deployment.roles, agent: TEST_AGENT },
+};
+const sepoliaEnv = { RPC_URL_SEPOLIA: TEST_RPC, AGENT_PRIVATE_KEY: TEST_KEY };
+
+test("createClients local signs with Anvil account #5 and ignores the environment", () => {
+  const { account } = createClients(deployment, "local", sepoliaEnv);
+  assert.equal(account.address, deployment.roles.agent);
+});
+
+test("createClients sepolia signs with AGENT_PRIVATE_KEY, with or without 0x", () => {
+  assert.equal(createClients(sepoliaDeployment, "sepolia", sepoliaEnv).account.address, TEST_AGENT);
+  const bare = { ...sepoliaEnv, AGENT_PRIVATE_KEY: TEST_KEY.slice(2) };
+  assert.equal(createClients(sepoliaDeployment, "sepolia", bare).account.address, TEST_AGENT);
+});
+
+test("createClients sepolia: a missing RPC_URL_SEPOLIA or AGENT_PRIVATE_KEY is a ConfigError", () => {
+  throwsConfig(() => createClients(sepoliaDeployment, "sepolia", { AGENT_PRIVATE_KEY: TEST_KEY }), /RPC_URL_SEPOLIA/);
+  throwsConfig(() => createClients(sepoliaDeployment, "sepolia", { RPC_URL_SEPOLIA: TEST_RPC }), /AGENT_PRIVATE_KEY/);
+});
+
+test("createClients sepolia: a malformed key is a ConfigError that does not echo the key", () => {
+  for (const bad of ["0xnot-a-key-but-a-secret", "0x1234", `${TEST_KEY}00`, `0x${"0".repeat(64)}`]) {
+    assert.throws(
+      () => createClients(sepoliaDeployment, "sepolia", { ...sepoliaEnv, AGENT_PRIVATE_KEY: bad }),
+      (err: unknown) => {
+        assert.ok(err instanceof ConfigError);
+        assert.match(err.message, /AGENT_PRIVATE_KEY/);
+        assert.ok(!err.message.includes(bad.slice(2)), "message must not contain the key");
+        return true;
+      },
+    );
+  }
+});
+
+test("createClients sepolia: a key that is not roles.agent is a ConfigError", () => {
+  const other = { ...sepoliaDeployment, roles: { ...sepoliaDeployment.roles, agent: deployment.roles.admin } };
+  throwsConfig(() => createClients(other, "sepolia", sepoliaEnv), /roles\.agent.*AGENT_ROLE/);
+});
+
+test("createClients: a deployment for another chain is a ConfigError", () => {
+  throwsConfig(() => createClients(deployment, "sepolia", sepoliaEnv), /chain 31337.*chain 11155111/);
+  throwsConfig(() => createClients(sepoliaDeployment, "local"), /chain 11155111.*chain 31337/);
+});
+
+test("createClients: no error message contains the RPC URL", () => {
+  const cases = [
+    () => createClients(deployment, "sepolia", sepoliaEnv),
+    () => createClients(sepoliaDeployment, "sepolia", { RPC_URL_SEPOLIA: TEST_RPC }),
+    () => createClients(sepoliaDeployment, "sepolia", { ...sepoliaEnv, AGENT_PRIVATE_KEY: "0x1234" }),
+  ];
+  for (const fn of cases) {
+    assert.throws(fn, (err: unknown) => {
+      assert.ok(err instanceof ConfigError);
+      assert.ok(!err.message.includes("secret-provider-key"));
+      return true;
+    });
+  }
+});
+
+// --- deployments/sepolia.json (committed) ---
+
+test("the committed deployments/sepolia.json is valid and for Sepolia", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const committed = loadDeployment(resolve(here, "../../deployments/sepolia.json"), "sepolia");
+  assert.equal(committed.chainId, sepolia.id);
+  assert.equal(committed.rpcUrl, undefined, "the Sepolia RPC URL belongs in RPC_URL_SEPOLIA");
+  assert.ok(committed.deployBlock !== undefined && committed.deployBlock > 0);
+  assert.deepEqual(
+    committed.counterparties.map((cp) => cp.name),
+    ["cp1", "cp2", "cp3"],
+  );
 });

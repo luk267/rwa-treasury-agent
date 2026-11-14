@@ -1,0 +1,20 @@
+{
+  "chainId": 11155111,
+  "deployBlock": 12132131,
+  "vault": "0xdc873f0277b57Fc0e27e267857aDBea947DE5fD0",
+  "roles": {
+    "admin": "0x9080D51d642380001a97c5a947AC7923EbaA76B8",
+    "treasurer": "0x9080D51d642380001a97c5a947AC7923EbaA76B8",
+    "pauser": "0x9080D51d642380001a97c5a947AC7923EbaA76B8",
+    "agent": "0xD0D7a08D8c47c8c248fcCF04b57cEFd9d0FE56D5"
+  },
+  "tokens": [
+    { "address": "0xa95950a36216Fd3543f37AB71430F552Cb351357", "symbol": "MOCK", "decimals": 18 }
+  ],
+  "counterparties": [
+    { "address": "0x70ef4F4f3441D27Da1c3C10932D15F388bf01332", "name": "cp1" },
+    { "address": "0x6c44059a1B67eAf48C7619Cd848a9F7F0258E595", "name": "cp2" },
+    { "address": "0xe27860fA04f6B4059c41800f9eebB1a84F8BEf0F", "name": "cp3" }
+  ],
+  "vaultFunding": "100000"
+}

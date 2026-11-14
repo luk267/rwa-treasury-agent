@@ -23,6 +23,13 @@ depth = 64
 # handler, so VaultHandler counts failed checks and an invariant reads the count.
 fail_on_revert = false
 
+# Values come from the environment or contracts/.env, never from this file.
+[rpc_endpoints]
+sepolia = "${RPC_URL_SEPOLIA}"
+
+[etherscan]
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
+
 [fmt]
 line_length = 120
 tab_width = 4

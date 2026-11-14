@@ -107,10 +107,43 @@ The [Quick start](#quick-start) shows how to run it yourself.
 ## Status
 
 Built during ETHGlobal Open Agents (24 April - 6 May 2026) and reworked since.
-It runs end to end on a local Anvil chain against `MockERC3643`, a test token
-modeled on T-REX v5.
+It runs end to end on a local Anvil chain and on the Sepolia testnet, both
+times against `MockERC3643`, a test token modeled on T-REX v5.
 
 Not audited. Not for production use.
+
+---
+
+## Live on Sepolia
+
+Both contracts are deployed on Sepolia, and their source is verified on
+Etherscan. The token is `MockERC3643`, the test double from this repo, not a
+real T-REX token.
+
+| What                                         | Link                                                                                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `TreasuryVault`, verified source             | [`0xdc873f…DE5fD0`](https://sepolia.etherscan.io/address/0xdc873f0277b57Fc0e27e267857aDBea947DE5fD0#code)                             |
+| `MockERC3643` (MOCK), verified source        | [`0xa95950…351357`](https://sepolia.etherscan.io/address/0xa95950a36216Fd3543f37AB71430F552Cb351357#code)                             |
+| 100 MOCK to `cp1`: `TransferExecuted`        | [`0x32f251…a8950b`](https://sepolia.etherscan.io/tx/0x32f25118ee2d0312cafefebf716dc2f401ea3596190dbeef96792f0428a8950b#eventlog)       |
+| 100 MOCK to `cp3`: `TransferRejected`        | [`0xcacd2a…c32091`](https://sepolia.etherscan.io/tx/0xcacd2af2829e450b280904ee93c7b7a99a6d5f5914978bde05025d69bcc32091#eventlog)       |
+
+Both transfers were sent from the agent's key with `cast`, like scene 5 of the
+demo. The rejected one is a successful transaction: the vault logs the refusal
+instead of reverting. Its log entry, decoded by Etherscan, reads `reason` 5
+(`ERC3643Compliance`, gate 5) and `detail` `0x58c10a24`, the selector of the
+token's `UnverifiedIdentity()` error: `cp3` has no verified identity in the
+token.
+
+The policy matches the local stack: 100,000 MOCK in the vault, daily caps of
+5,000 MOCK for `cp1` and 1,000 MOCK each for `cp2` and `cp3`, 8,000 MOCK per
+day in total. `cp1` to `cp3` are placeholder addresses derived from a label,
+so nobody holds their keys. Addresses and the deploy block are in
+[`deployments/sepolia.json`](deployments/sepolia.json).
+
+On the testnet one key holds `DEFAULT_ADMIN_ROLE`, `TREASURER_ROLE` and
+`PAUSER_ROLE`, and it deployed the mock, so it is also the token's issuer.
+The agent has a key of its own with `AGENT_ROLE` only. In production these
+would be separate keys or multisigs.
 
 ---
 
@@ -239,6 +272,39 @@ Every agent run calls the Claude API and uses a little API credit. Scene 5 of
 the demo does not. See
 [`agent/README.md`](agent/README.md) for flags, exit codes and configuration.
 
+### Sepolia
+
+The agent runs against the deployment above when `AGENT_NETWORK=sepolia`. It
+then needs `RPC_URL_SEPOLIA` and `AGENT_PRIVATE_KEY` in `agent/.env`, and the
+key must hold `AGENT_ROLE` in that vault:
+
+```bash
+cd agent
+AGENT_NETWORK=sepolia npm start -- "show the vault holdings"
+```
+
+To deploy your own copy, [`contracts/script/Deploy.s.sol`](contracts/script/Deploy.s.sol)
+reads the role addresses from the environment and takes the signer from the
+command line, so no key is in the code. The signer must be `TREASURER`,
+because the demo setup needs `TREASURER_ROLE`. The agent must hold no other
+role. Foundry reads `RPC_URL_SEPOLIA` and `ETHERSCAN_API_KEY` from the shell
+or from `contracts/.env`:
+
+```bash
+cd contracts
+export ADMIN=0x… TREASURER=0x… PAUSER=0x… AGENT=0x… ADMIN_TRANSFER_DELAY=86400
+forge script script/Deploy.s.sol:Deploy --rpc-url sepolia \
+  --private-key "$DEPLOYER_PRIVATE_KEY" --broadcast --slow
+forge verify-contract <mock> test/mocks/MockERC3643.sol:MockERC3643 --chain sepolia --watch
+forge verify-contract <vault> src/TreasuryVault.sol:TreasuryVault --chain sepolia --watch \
+  --constructor-args $(cast abi-encode "constructor(uint48,address,address,address,address)" \
+    "$ADMIN_TRANSFER_DELAY" "$ADMIN" "$TREASURER" "$AGENT" "$PAUSER")
+```
+
+The script logs every address. Copy them into `deployments/sepolia.json`,
+with the block of the first deployment transaction from
+`broadcast/Deploy.s.sol/11155111/run-latest.json` as `deployBlock`.
+
 ---
 
 ## Stack
@@ -246,7 +312,7 @@ the demo does not. See
 | Layer     | Tooling                                                               |
 | --------- | --------------------------------------------------------------------- |
 | Contracts | Solidity 0.8.38, Foundry 1.9.0, OpenZeppelin `AccessControl`          |
-| Token     | ERC-3643 (T-REX) interface; `MockERC3643` for local tests             |
+| Token     | ERC-3643 (T-REX) interface; `MockERC3643` for tests and the demos     |
 | Agent     | TypeScript (strict), Node 22+, viem, `@anthropic-ai/sdk`, zod         |
 | CI        | GitHub Actions: `forge` fmt, lint, build, test; `tsc`, `npm test`     |
 
@@ -264,6 +330,7 @@ contracts/
   test/mocks/MockERC3643.sol    T-REX v5-style test double: identity, freeze, pause, forced transfer
   test/mocks/                   plus small tokens that fail without a reason, burn gas or re-enter
   script/DeployLocal.s.sol      local Anvil deployment
+  script/Deploy.s.sol           deployment to any network, roles from the environment
 
 agent/
   src/index.ts                  entry point: setup, operator prompt, exit codes
@@ -276,6 +343,9 @@ docs/
   architecture.md               component layout, transfer flow, gate reference, alternatives
   threat-model.md               threats, mitigations with tests, known limitations
   adr/                          architecture decision records
+
+deployments/
+  sepolia.json                  Sepolia addresses and deploy block (local.json is generated)
 
 scripts/
   local-dev.sh                  Anvil + deploy + write deployments/local.json

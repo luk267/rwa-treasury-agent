@@ -3,7 +3,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import { config as loadEnv } from "dotenv";
-import { createClients, loadDeployment, ConfigError } from "./config.js";
+import { createClients, loadDeployment, resolveNetwork, ConfigError } from "./config.js";
 import { AgentLoopError, runAgent } from "./loop.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { createGetPortfolioTool } from "./tools/get-portfolio.js";
@@ -38,16 +38,26 @@ async function main(): Promise<number> {
     throw new ConfigError("ANTHROPIC_API_KEY is not set. Add it to agent/.env.");
   }
 
+  const network = resolveNetwork(process.env.AGENT_NETWORK);
   const here = dirname(fileURLToPath(import.meta.url));
-  const deployment = loadDeployment(resolve(here, "../../deployments/local.json"));
-  const { publicClient, walletClient, account } = createClients(deployment);
+  const deployment = loadDeployment(resolve(here, `../../deployments/${network}.json`), network);
+  const { publicClient, walletClient, account } = createClients(deployment, network);
 
-  // Fail before spending API credits if the local chain is not running.
+  // Fail before spending API credits if the chain is unreachable or not the expected one.
+  // The Sepolia URL is not printed: it usually carries a provider key.
+  let chainId: number;
   try {
-    await publicClient.getChainId();
+    chainId = await publicClient.getChainId();
   } catch {
     throw new RpcUnavailableError(
-      `Cannot reach the RPC at ${deployment.rpcUrl}. Is ./scripts/local-dev.sh running?`,
+      network === "local"
+        ? `Cannot reach the RPC at ${deployment.rpcUrl}. Is ./scripts/local-dev.sh running?`
+        : "Cannot reach the RPC in RPC_URL_SEPOLIA.",
+    );
+  }
+  if (chainId !== deployment.chainId) {
+    throw new ConfigError(
+      `The RPC serves chain ${chainId}, but deployments/${network}.json is for chain ${deployment.chainId}.`,
     );
   }
 

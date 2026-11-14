@@ -51,6 +51,8 @@ freeze the vault's tokens directly (see [Issuer rights](#issuer-rights)).
 | TypeScript agent          | Own tool loop over the Claude Messages API with three tools (read holdings and limits from the chain, simulate, submit). Asks the operator before a real transfer. System prompt requires simulate before execute and maps `RejectReason` and the decoded token error back to plain language. | `agent/src/` |
 | `DeployLocal.s.sol`       | Foundry script: deploys both contracts, verifies the vault, `cp1` and `cp2` in the token, funds the vault, allows the token with a daily outflow cap, whitelists three counterparties and sets their daily caps for the token. | `contracts/script/`            |
 | `scripts/local-dev.sh`    | Starts Anvil, runs the deploy script, parses output, writes `deployments/local.json`.                                      | `scripts/`                     |
+| `Deploy.s.sol`            | Foundry script for any network, used for Sepolia: the same setup as `DeployLocal.s.sol`, with role addresses from the environment and the signer from the command line. Refuses an agent that shares a role, and a signer that is not the treasurer. | `contracts/script/`            |
+| `deployments/sepolia.json` | Addresses, roles and deploy block of the Sepolia deployment. Read by the agent when `AGENT_NETWORK=sepolia`.             | `deployments/`                 |
 
 ---
 
@@ -82,11 +84,17 @@ The local stack uses one Anvil account per role:
 | #5      | `AGENT_ROLE` (the agent's key)      |
 | #6      | Counterparty `cp3`: whitelisted in the vault, not verified in the token |
 
+On Sepolia one key holds `DEFAULT_ADMIN_ROLE`, `TREASURER_ROLE` and
+`PAUSER_ROLE` and is the mock token's issuer. The agent's key is a separate
+one with `AGENT_ROLE` only; `Deploy.s.sol` refuses anything else. The three
+counterparties are placeholder addresses derived from a label, so nobody
+holds their keys.
+
 **Admin handover.** There is exactly one admin. `grantRole(DEFAULT_ADMIN_ROLE, …)`
 is blocked. A handover takes two steps: the admin calls
 `beginDefaultAdminTransfer(newAdmin)`, and the new admin calls
 `acceptDefaultAdminTransfer()` once the delay has passed (one day in the local
-stack). A typo in the address or a stolen admin key cannot move the role in a
+stack and on Sepolia). A typo in the address or a stolen admin key cannot move the role in a
 single transaction, and the current admin can cancel during the delay. The
 delay covers the handover only. The admin can still grant the other three
 roles at once, so the admin key stays the root of trust (row 17 in the
@@ -351,8 +359,8 @@ which is to validate the three-layer policy + agent integration.
   wrapper.
 - **A real T-REX deployment.** The tests run against `MockERC3643`, which
   stubs the identity registry and the compliance contract as flags.
-- **Mainnet or Sepolia deployment.** Currently local Anvil only. Sepolia
-  is planned.
+- **Mainnet deployment.** The vault runs on Anvil and on Sepolia, both times
+  with `MockERC3643`. On Sepolia one key holds admin, treasurer and pauser.
 
 The known limitations of the current vault are listed in
 [`threat-model.md`](threat-model.md#known-limitations).
@@ -373,6 +381,9 @@ The known limitations of the current vault are listed in
 | Counters-not-consumed-on-reject test                 | [`contracts/test/unit/TreasuryVault.ERC3643Compliance.t.sol`](../contracts/test/unit/TreasuryVault.ERC3643Compliance.t.sol)     |
 | Local deployment script                              | [`contracts/script/DeployLocal.s.sol`](../contracts/script/DeployLocal.s.sol)                                                   |
 | Anvil bootstrap + deployment-info writer             | [`scripts/local-dev.sh`](../scripts/local-dev.sh)                                                                               |
+| Deployment script for Sepolia (any network)          | [`contracts/script/Deploy.s.sol`](../contracts/script/Deploy.s.sol)                                                             |
+| Sepolia addresses and deploy block                   | [`deployments/sepolia.json`](../deployments/sepolia.json)                                                                       |
+| Network choice, agent key and RPC per network        | [`agent/src/config.ts`](../agent/src/config.ts)                                                                                 |
 | Agent entry point: pre-flight checks, exit codes     | [`agent/src/index.ts`](../agent/src/index.ts)                                                                                   |
 | Tool loop over the Claude Messages API               | [`agent/src/loop.ts`](../agent/src/loop.ts)                                                                                     |
 | Decoding the token's revert data in `detail`         | [`agent/src/outcome.ts`](../agent/src/outcome.ts)                                                                               |

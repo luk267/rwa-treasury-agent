@@ -122,8 +122,8 @@ finds.
 
 ## Local development
 
-The agent reads `deployments/local.json`, which is written by the repo's
-local stack script:
+By default the agent reads `deployments/local.json` (for Sepolia, see
+[Configuration](#configuration)). The repo's local stack script writes it:
 
 ```bash
 # from the repo root, in a separate terminal:
@@ -155,7 +155,7 @@ the run.
 | Code | Meaning                                                                      |
 | ---- | ---------------------------------------------------------------------------- |
 | 0    | The agent finished (a rejected or declined transfer is still 0).             |
-| 1    | Bad input or configuration: no prompt, no API key, no or invalid deployment. |
+| 1    | Bad input or configuration: no prompt, no API key, no or invalid deployment, unknown network, missing Sepolia variable, wrong key or chain. |
 | 2    | Anthropic API or RPC failure, or the model stopped unexpectedly.             |
 
 Errors go to stderr as one line, without a stack trace. The agent checks the
@@ -164,20 +164,30 @@ API credits.
 
 ## Configuration
 
-Copy `../.env.example` to `.env`. The agent reads three variables:
+Copy `../.env.example` to `.env`. The agent reads six variables:
 
-| Variable             | Required | Purpose                                         |
-| -------------------- | -------- | ----------------------------------------------- |
-| `ANTHROPIC_API_KEY`  | yes      | Authenticates against the Claude Messages API.  |
-| `AGENT_MODEL`        | no       | Claude model ID. Defaults to `claude-opus-5-5`. |
-| `AGENT_AUTO_APPROVE` | no       | `1` skips the transfer prompt, like `--yes`.    |
+| Variable             | Required     | Purpose                                                    |
+| -------------------- | ------------ | ---------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`  | yes          | Authenticates against the Claude Messages API.             |
+| `AGENT_MODEL`        | no           | Claude model ID. Defaults to `claude-opus-5-5`.            |
+| `AGENT_AUTO_APPROVE` | no           | `1` skips the transfer prompt, like `--yes`.               |
+| `AGENT_NETWORK`      | no           | `local` (default) or `sepolia`.                            |
+| `RPC_URL_SEPOLIA`    | with sepolia | Sepolia RPC endpoint.                                      |
+| `AGENT_PRIVATE_KEY`  | with sepolia | The agent's key. Must hold `AGENT_ROLE` in the vault.      |
 
-The agent only runs against the local Anvil stack.
-[`src/config.ts`](src/config.ts) hardcodes Anvil account #5 and the `foundry`
-chain. It takes no RPC URL and no private key from the environment. Account #5
-holds `AGENT_ROLE` and no other role. At startup the agent checks that its key
-matches `roles.agent` in `deployments/local.json` and exits with an error
-otherwise.
+[`src/config.ts`](src/config.ts) picks the network:
+
+| `AGENT_NETWORK` | Deployment file            | Chain     | RPC                        | Key                          |
+| --------------- | -------------------------- | --------- | -------------------------- | ---------------------------- |
+| `local`         | `deployments/local.json`   | `foundry` | `rpcUrl` in the file       | Anvil account #5, hardcoded  |
+| `sepolia`       | `deployments/sepolia.json` | `sepolia` | `RPC_URL_SEPOLIA`          | `AGENT_PRIVATE_KEY`          |
+
+The Anvil key is used only for `local`, and `local` ignores the two Sepolia
+variables. `sepolia.json` is committed and has no `rpcUrl`, because an RPC URL
+usually carries a provider key. At startup the agent checks that its key
+matches `roles.agent` in the deployment file, that the file is for the
+network's chain, and that the RPC serves that chain. Any mismatch exits with
+code 1. Error messages name the variable, never its value.
 
 ## Source layout
 
@@ -188,8 +198,8 @@ src/
   loop.test.ts    loop against a fake client: stop reasons, turn limit, approval, input errors
   outcome.ts      decodes TransferRejected detail, maps RejectReason
   outcome.test.ts decoder tests
-  config.ts       validates deployments/local.json (zod), viem clients, token/counterparty/amount parsing
-  config.test.ts  names, addresses, amounts, broken deployment files
+  config.ts       network choice, validates deployments/<network>.json (zod), key and RPC, viem clients, token/counterparty/amount parsing
+  config.test.ts  names, addresses, amounts, broken deployment files, networks, keys, the committed sepolia.json
   prompt.ts       system prompt: rules, gate order, reverts, token errors, token and counterparty names
   prompt.test.ts  the prompt explains every reject reason, vault revert and token error
   abi.ts          vault + ERC-3643 ABI fragments, token errors, RejectReason enum
