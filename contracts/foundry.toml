@@ -13,6 +13,16 @@ evm_version = "osaka"
 # (Warning 6335). Hide warnings from forge-std only; our own code and OpenZeppelin still warn.
 ignored_warnings_from = ["lib/forge-std"]
 
+[fuzz]
+runs = 1000
+
+[invariant]
+runs = 256
+depth = 64
+# A handler call that reverts is skipped, not failed. That includes a failed assert inside the
+# handler, so VaultHandler counts failed checks and an invariant reads the count.
+fail_on_revert = false
+
 [fmt]
 line_length = 120
 tab_width = 4

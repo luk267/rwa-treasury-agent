@@ -259,6 +259,8 @@ contracts/
   src/TreasuryVault.sol         policy gate + ERC-3643 delegation
   src/interfaces/IERC3643.sol   minimal T-REX interface
   test/unit/                    unit tests, one suite per concern
+  test/fuzz/                    fuzz tests: cap boundary, rejections, any amount
+  test/invariant/               invariant suite and VaultHandler (random call sequences)
   test/mocks/MockERC3643.sol    T-REX v5-style test double: identity, freeze, pause, forced transfer
   test/mocks/                   plus small tokens that fail without a reason, burn gas or re-enter
   script/DeployLocal.s.sol      local Anvil deployment
@@ -302,6 +304,31 @@ The suites cover the vault's gates, the role split and the ERC-3643 integration:
 | `TreasuryVault.ERC3643Compliance.t.sol` | try/catch on the token's compliance check     |
 | `TreasuryVault.IssuerRights.t.sol`      | Token-side rejections, issuer forced transfer |
 | `TreasuryVault.ExecutionPath.t.sol`     | Zero amount, token without a reason, out-of-gas, re-entrancy |
+| `TreasuryVault.fuzz.t.sol`              | Cap boundary to the wei, rejections without effect, any amount without a panic |
+| `TreasuryVault.invariants.t.sol`        | Five invariants over random call sequences    |
+
+The invariant suite lets Foundry call `VaultHandler` in random order: agent
+transfers, time jumps of up to two days, issuer actions (verify, freeze, pause,
+compliance, forced transfer) and cap raises, 256 runs of 64 calls. The tokens
+include one the treasurer never allowed and one that calls back into the vault;
+the counterparties include one that was never whitelisted. After every call:
+
+- `invariant_counterpartyDailyCapNeverExceeded`: no counterparty receives more of
+  a token in one day than its cap.
+- `invariant_assetDailyCapNeverExceeded`: no token leaves the vault faster in one
+  day than its daily outflow cap.
+- `invariant_vaultBalanceOnlyDropsWithExecutedOrIssuerAction`: the vault's
+  balance equals its funding minus executed transfers minus the issuer's forced
+  transfers.
+- `invariant_countersMatchLedger`: the vault's daily counters equal the handler's
+  own ledger of executed transfers.
+- `invariant_handlerChecksHeld`: every executed transfer passed all gates and
+  moved exactly its amount, and every rejection changed nothing.
+
+The invariants show that the vault never lets too much out. That it does not
+refuse a transfer that fits is shown by `testFuzz_dailyCap_boundary`.
+`forge test --mc TreasuryVaultInvariants -vv` prints how many transfers the last
+run executed and how many each gate rejected.
 
 The agent's tests run with `cd agent && npm test`, without network or API
 calls: the tool loop against a fake client, input and deployment parsing,
