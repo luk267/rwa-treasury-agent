@@ -134,11 +134,11 @@ instead of reverting. Its log entry, decoded by Etherscan, reads `reason` 5
 token's `UnverifiedIdentity()` error: `cp3` has no verified identity in the
 token.
 
-The policy matches the local stack: 100,000 MOCK in the vault, daily caps of
-5,000 MOCK for `cp1` and 1,000 MOCK each for `cp2` and `cp3`, 8,000 MOCK per
-day in total. `cp1` to `cp3` are placeholder addresses derived from a label,
-so nobody holds their keys. Addresses and the deploy block are in
-[`deployments/sepolia.json`](deployments/sepolia.json).
+The policy matches the local stack: the vault was funded with 100,000 MOCK,
+daily caps of 5,000 MOCK for `cp1` and 1,000 MOCK each for `cp2` and `cp3`,
+8,000 MOCK per day in total. `cp1` to `cp3` are placeholder addresses derived
+from a label, so nobody holds their keys. Addresses and the deploy block are
+in [`deployments/sepolia.json`](deployments/sepolia.json).
 
 On the testnet one key holds `DEFAULT_ADMIN_ROLE`, `TREASURER_ROLE` and
 `PAUSER_ROLE`, and it deployed the mock, so it is also the token's issuer.

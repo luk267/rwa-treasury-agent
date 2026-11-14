@@ -194,9 +194,12 @@ Gates 3 and 4 compare with `spent > cap || amount > cap - spent`. The check
 cannot overflow, and a cap lowered below what was already spent today rejects
 instead of underflowing. Caps and counters are kept per token, because raw
 amounts of tokens with different decimals cannot be added. `type(uint256).max`
-means unlimited. `getAssetConfig`, `getCounterparty`,
-`getCounterpartyDailyCap`, `spentToday` and `assetSpentToday` expose the
-configuration and today's usage; the agent reads them at run time.
+means unlimited. Unlimited is still a number: an amount above `max` minus
+today's spending is refused by the cap, not by the token. No token balance can
+reach that amount, so only the reported reason differs. `getAssetConfig`,
+`getCounterparty`, `getCounterpartyDailyCap`, `spentToday` and
+`assetSpentToday` expose the configuration and today's usage; the agent reads
+them at run time.
 
 Reject reasons are carried in the `RejectReason` enum, on the
 `TransferRejected` event and in the return value of `executeTransfer`, so a

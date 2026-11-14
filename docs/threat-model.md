@@ -5,8 +5,11 @@ assumes, and which threats it handles. Each mitigation names the test that
 shows it. Known gaps are listed at the end, open ones first, then the ones
 already fixed, so a reviewer does not have to find them.
 
-Scope: `TreasuryVault.sol`, the TypeScript agent, and the local stack with
-`MockERC3643`. The component layout is in [`architecture.md`](architecture.md).
+Scope: `TreasuryVault.sol`, the TypeScript agent, the local stack with
+`MockERC3643`, and the Sepolia deployment. Sepolia runs the same code, but one
+key holds `DEFAULT_ADMIN_ROLE`, `TREASURER_ROLE` and `PAUSER_ROLE` there, so the
+assumption "each role on its own account" holds only for the agent. The
+component layout is in [`architecture.md`](architecture.md).
 
 **How to read the table.** A row starts from something an actor could try.
 "Mitigation" is what stops or limits it. "Test" is the Foundry test in

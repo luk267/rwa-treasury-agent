@@ -70,11 +70,11 @@ reason at execution and keeps it in the log.
 
 ## Rejected alternatives
 
-- **Revert for everything, with `TransferBlocked(RejectReason reason, bytes detail)`.**
-  Closer to Zodiac and ERC-8226, and simpler for integrators. Rejected
-  because the on-chain trail of blocked attempts disappears, and the change
-  would touch the contract, every test, the agent and the docs without
-  fixing a real defect.
+- **Revert for everything, with
+  `TransferBlocked(RejectReason reason, bytes detail)`.** Closer to Zodiac
+  and ERC-8226, and simpler for integrators. Rejected because the on-chain
+  trail of blocked attempts disappears, and the change would touch the
+  contract, every test, the agent and the docs without fixing a real defect.
 - **Emit an event and then revert.** Not possible: a revert discards the
   events of the reverted call.
 - **A separate `checkTransfer` view.** Gives callers a pre-check, but
