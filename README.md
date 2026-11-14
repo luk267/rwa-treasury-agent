@@ -383,9 +383,10 @@ The suites cover the vault's gates, the role split and the ERC-3643 integration:
 
 The invariant suite lets Foundry call `VaultHandler` in random order: agent
 transfers, time jumps of up to two days, issuer actions (verify, freeze, pause,
-compliance, forced transfer) and cap raises, 256 runs of 64 calls. The tokens
-include one the treasurer never allowed and one that calls back into the vault;
-the counterparties include one that was never whitelisted. After every call:
+compliance, forced transfer), cap raises and counterparties switched off and
+on again, 256 runs of 64 calls. The tokens include one the treasurer never
+allowed and one that calls back into the vault; the counterparties include one
+that was never whitelisted. After every call:
 
 - `invariant_counterpartyDailyCapNeverExceeded`: no counterparty receives more of
   a token in one day than its cap.
@@ -397,7 +398,8 @@ the counterparties include one that was never whitelisted. After every call:
 - `invariant_countersMatchLedger`: the vault's daily counters equal the handler's
   own ledger of executed transfers.
 - `invariant_handlerChecksHeld`: every executed transfer passed all gates and
-  moved exactly its amount, and every rejection changed nothing.
+  moved exactly its amount, every rejection changed nothing, and no transfer
+  reverted.
 
 The invariants show that the vault never lets too much out. That it does not
 refuse a transfer that fits is shown by `testFuzz_dailyCap_boundary`.

@@ -9,7 +9,7 @@ import { ReentrantToken } from "../mocks/ReentrantToken.sol";
 import { VaultHandler } from "./VaultHandler.sol";
 
 /// @dev Properties that must hold after any sequence of agent transfers, time jumps, issuer
-///      actions and cap raises. Foundry calls only the handler; the handler books what moved.
+///      actions, cap raises and counterparties switched off and on. Foundry calls only the handler; the handler books what moved.
 ///      Each invariant compares the vault with that ledger or with its own caps.
 contract TreasuryVaultInvariants is Test {
     uint256 constant UNLIMITED = type(uint256).max;
@@ -83,8 +83,8 @@ contract TreasuryVaultInvariants is Test {
         handler = new VaultHandler(vault, agent, treasurer, issuer, _tokens, issuerTokens, _counterparties);
 
         // Foundry picks uniformly from this list. The transfer is listed three times, so three in
-        // seven calls are transfers and several of them fall into the same day bucket.
-        bytes4[] memory selectors = new bytes4[](7);
+        // eight calls are transfers and several of them fall into the same day bucket.
+        bytes4[] memory selectors = new bytes4[](8);
         selectors[0] = VaultHandler.transfer.selector;
         selectors[1] = VaultHandler.transfer.selector;
         selectors[2] = VaultHandler.transfer.selector;
@@ -92,6 +92,7 @@ contract TreasuryVaultInvariants is Test {
         selectors[4] = VaultHandler.issuerToggle.selector;
         selectors[5] = VaultHandler.issuerForcedTransfer.selector;
         selectors[6] = VaultHandler.treasurerRaiseCap.selector;
+        selectors[7] = VaultHandler.treasurerToggleCounterparty.selector;
         targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
         targetContract(address(handler));
     }
@@ -178,7 +179,7 @@ contract TreasuryVaultInvariants is Test {
 
     /// @dev The checks the handler runs around each call held: an executed transfer passed every
     ///      gate and moved exactly its amount, a rejection changed nothing, a forced transfer left
-    ///      the counters alone. Foundry ignores reverts in handler calls, so the handler counts
+    ///      the counters alone, and no executeTransfer call reverted. Foundry ignores reverts in handler calls, so the handler counts
     ///      failed checks and this invariant reads the count.
     function invariant_handlerChecksHeld() external view {
         assertEq(handler.failedChecks(), 0, handler.firstFailedCheck());
@@ -222,6 +223,8 @@ contract TreasuryVaultInvariants is Test {
                 vm.toString(handler.forcedTransfers()),
                 ", cap raise ",
                 vm.toString(handler.capRaises()),
+                ", counterparty toggle ",
+                vm.toString(handler.counterpartyToggles()),
                 "; day bucket at the end: ",
                 vm.toString(block.timestamp / 1 days)
             )

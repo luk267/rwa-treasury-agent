@@ -11,8 +11,9 @@ import { MockERC3643 } from "../mocks/MockERC3643.sol";
 ///         its own ledger of what moved.
 /// @dev The invariant suite lets Foundry call only this contract. Each action turns fuzzed numbers
 ///      into a call the vault sees in practice: the agent's transfer, a jump in time, an issuer
-///      action on the token, or the treasurer raising a cap. The ledger is written from what the
-///      handler observes, never copied from the vault's own counters.
+///      action on the token, or the treasurer raising a cap or switching a counterparty off and on.
+///      The ledger is written from what the handler observes, never copied from the vault's own
+///      counters.
 ///      With fail_on_revert = false, Foundry also ignores a failed assertion inside a handler call,
 ///      because the assertion reverts. So the checks in this contract record a violation instead of
 ///      reverting, and the invariant suite asserts that none was recorded.
@@ -70,6 +71,7 @@ contract VaultHandler is Test {
     uint256 public issuerToggles;
     uint256 public forcedTransfers;
     uint256 public capRaises;
+    uint256 public counterpartyToggles;
 
     // ── Checks inside actions ────────────────────────────────────────
 
@@ -110,9 +112,9 @@ contract VaultHandler is Test {
     ///      through unchanged: as wei they would be dust that never reaches a cap. The fuzz suite
     ///      covers the cap boundary down to one wei.
     ///      An executed transfer must have passed every vault gate, measured on the state before
-    ///      the call, and must move exactly `amount`. A rejection must change nothing. A revert is
-    ///      counted; none is expected, because the amount is never zero and the vault is never
-    ///      paused here.
+    ///      the call, and must move exactly `amount`. A rejection must change nothing. A revert
+    ///      fails a check: none is expected, because the amount is never zero, the vault is never
+    ///      paused here, and the vault handles every token failure that carries a reason.
     /// @param tokenSeed Picks the token.
     /// @param cpSeed Picks the counterparty.
     /// @param amount The amount in whole tokens, bounded to [1, 2500].
@@ -132,6 +134,7 @@ contract VaultHandler is Test {
             else _checkRejected(reason, before, afterCall);
         } catch {
             reverted++;
+            _check(false, "executeTransfer reverted");
         }
     }
 
@@ -200,7 +203,7 @@ contract VaultHandler is Test {
     /// @dev Caps only go up here. A lowered cap can sit below what was already spent today, and
     ///      the cap invariants would then flag a correct vault. Unit tests cover lowering.
     /// @param seed Picks the token, the kind of cap and the counterparty.
-    /// @param cap The increase, bounded to [1, 3000e18].
+    /// @param cap The increase in whole tokens, bounded to [1, 3000], like the transfer amount.
     function treasurerRaiseCap(uint256 seed, uint256 cap) external {
         address token = _tokens[seed % _tokens.length];
         seed /= _tokens.length;
@@ -212,12 +215,39 @@ contract VaultHandler is Test {
         uint256 current = assetCap ? asset.dailyOutflowCap : VAULT.getCounterpartyDailyCap(cp, token);
         // Unlimited, or close enough that the raise would overflow.
         if (current > type(uint256).max - MAX_RAISE) return;
-        uint256 raised = current + bound(cap, 1, MAX_RAISE);
+        uint256 raised = current + bound(cap, 1, MAX_RAISE / 1e18) * 1e18;
         capRaises++;
 
         vm.prank(TREASURER);
         if (assetCap) VAULT.setAssetConfig(token, asset.allowed, raised);
         else VAULT.setCounterpartyDailyCap(cp, token, raised);
+    }
+
+    /// @notice The treasurer switches a whitelisted counterparty off, or one back on.
+    /// @dev One call in four switches a random active counterparty off. The others switch the
+    ///      first inactive one back on, so most transfers still get past gate 2. Only counterparties
+    ///      added in setUp come back, so the outsider stays a case for gate 2. Neither call touches
+    ///      caps or day counters: the ledger stays valid.
+    /// @param seed Picks whether to switch off, and which counterparty.
+    function treasurerToggleCounterparty(uint256 seed) external {
+        bool switchOff = seed % 4 == 0;
+        seed /= 4;
+        if (switchOff) {
+            address cp = _counterparties[seed % _counterparties.length];
+            if (!VAULT.getCounterparty(cp).active) return;
+            counterpartyToggles++;
+            vm.prank(TREASURER);
+            VAULT.deactivateCounterparty(cp);
+            return;
+        }
+        for (uint256 i = 0; i < _counterparties.length; i++) {
+            TreasuryVault.Counterparty memory record = VAULT.getCounterparty(_counterparties[i]);
+            if (record.addedAt == 0 || record.active) continue;
+            counterpartyToggles++;
+            vm.prank(TREASURER);
+            VAULT.addCounterparty(_counterparties[i]);
+            return;
+        }
     }
 
     // ── Internals ────────────────────────────────────────────────────
