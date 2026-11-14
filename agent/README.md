@@ -136,7 +136,7 @@ Then, in `agent/`:
 cp ../.env.example .env                    # then set ANTHROPIC_API_KEY
 npm install
 npm run typecheck                          # tsc --noEmit
-npm test                                   # unit tests (node:test), no network
+npm test                                   # unit tests (node:test), no network, needs contracts/out
 npm start "show the vault holdings"
 npm start "transfer 500 MOCK to cp1"       # asks before sending
 npm start -- --yes "try to transfer 10000 MOCK to cp1"   # hits the daily cap
@@ -202,7 +202,8 @@ src/
   config.test.ts  names, addresses, amounts, broken deployment files, networks, keys, the committed sepolia.json
   prompt.ts       system prompt: rules, gate order, reverts, token errors, token and counterparty names
   prompt.test.ts  the prompt explains every reject reason, vault revert and token error
-  abi.ts          vault + ERC-3643 ABI fragments, token errors, RejectReason enum
+  abi.ts          vault ABI fragments, ERC-20 balanceOf, token errors, RejectReason enum
+  abi.test.ts     VAULT_ABI and REJECT_REASON against the compiled vault (after forge build)
   tools/
     types.ts                     VaultTool interface, shared input schema, transfer arguments, revert and error naming
     get-portfolio.ts             balances, token config, caps and today's usage, read from the vault

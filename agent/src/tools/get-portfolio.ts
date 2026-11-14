@@ -1,6 +1,6 @@
 import { formatUnits, maxUint256, type PublicClient } from "viem";
 import { z } from "zod";
-import { IERC3643_ABI, VAULT_ABI } from "../abi.js";
+import { ERC20_ABI, VAULT_ABI } from "../abi.js";
 import type { Deployment, Token } from "../config.js";
 import { inputSchema, toolError, type VaultTool } from "./types.js";
 
@@ -21,7 +21,7 @@ export function createGetPortfolioTool(
     const [balance, config, spent] = await Promise.all([
       publicClient.readContract({
         address: token.address,
-        abi: IERC3643_ABI,
+        abi: ERC20_ABI,
         functionName: "balanceOf",
         args: [vault],
       }),

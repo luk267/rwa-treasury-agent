@@ -46,6 +46,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # abi.test.ts compares the agent's ABI with the compiled vault in contracts/out.
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.9.0
+
+      - name: Build contracts
+        working-directory: contracts
+        run: forge build --skip test --skip script
 
       - name: Setup Node
         uses: actions/setup-node@v7

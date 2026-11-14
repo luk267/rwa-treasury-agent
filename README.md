@@ -402,7 +402,9 @@ run executed and how many each gate rejected.
 
 The agent's tests run with `cd agent && npm test`, without network or API
 calls: the tool loop against a fake client, input and deployment parsing,
-error naming, receipt decoding and the decoder for the token's revert data.
+error naming, receipt decoding, the decoder for the token's revert data, and
+the agent's ABI and reject reasons against the compiled vault. That last test
+needs `forge build` in `contracts/` first.
 
 ---
 

@@ -1,5 +1,5 @@
-// ABI fragments needed by the agent tools. Hand-curated from TreasuryVault.sol
-// (plus ERC-20 balanceOf and the token errors) - keep in sync if the vault changes.
+// ABI fragments needed by the agent tools, written by hand. abi.test.ts checks
+// VAULT_ABI and REJECT_REASON against the compiled vault in contracts/out.
 
 export const VAULT_ABI = [
   {
@@ -127,7 +127,9 @@ export const VAULT_ABI = [
   },
 ] as const;
 
-export const IERC3643_ABI = [
+// The only token function the agent calls. It is plain ERC-20, which every ERC-3643
+// token implements; the vault's IERC3643.sol lists only what the vault calls.
+export const ERC20_ABI = [
   {
     type: "function",
     name: "balanceOf",
@@ -139,8 +141,8 @@ export const IERC3643_ABI = [
 
 // Errors an ERC-3643 (T-REX v5) token reverts with on transfer. The vault catches
 // the revert and forwards the raw bytes as `detail` in TransferRejected and in its
-// return value; this ABI
-// lets the agent decode them. Error(string) and Panic(uint256) are built into viem.
+// return value; this ABI lets the agent decode them. Error(string) and
+// Panic(uint256) are built into viem.
 export const TOKEN_ERRORS_ABI = [
   { type: "error", name: "UnverifiedIdentity", inputs: [] },
   { type: "error", name: "ComplianceNotFollowed", inputs: [] },

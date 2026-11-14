@@ -12,6 +12,9 @@ evm_version = "osaka"
 # solc 0.8.38 warns 58 times that forge-std's Vm.sol uses `error` as a parameter name
 # (Warning 6335). Hide warnings from forge-std only; our own code and OpenZeppelin still warn.
 ignored_warnings_from = ["lib/forge-std"]
+# Write the AST into the artifacts: agent/src/abi.test.ts reads enum RejectReason from it.
+# This changes the build output only, not the bytecode.
+ast = true
 
 [fuzz]
 runs = 1000
