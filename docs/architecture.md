@@ -90,14 +90,14 @@ one with `AGENT_ROLE` only; `Deploy.s.sol` refuses anything else. The three
 counterparties are placeholder addresses derived from a label, so nobody
 holds their keys.
 
-**Admin handover.** There is exactly one admin. `grantRole(DEFAULT_ADMIN_ROLE, …)`
-is blocked. A handover takes two steps: the admin calls
-`beginDefaultAdminTransfer(newAdmin)`, and the new admin calls
+**Admin handover.** There is exactly one admin.
+`grantRole(DEFAULT_ADMIN_ROLE, …)` is blocked. A handover takes two steps: the
+admin calls `beginDefaultAdminTransfer(newAdmin)`, and the new admin calls
 `acceptDefaultAdminTransfer()` once the delay has passed (one day in the local
-stack and on Sepolia). A typo in the address or a stolen admin key cannot move the role in a
-single transaction, and the current admin can cancel during the delay. The
-delay covers the handover only. The admin can still grant the other three
-roles at once, so the admin key stays the root of trust (row 17 in the
+stack and on Sepolia). A typo in the address or a stolen admin key cannot move
+the role in a single transaction, and the current admin can cancel during the
+delay. The delay covers the handover only. The admin can still grant the other
+three roles at once, so the admin key stays the root of trust (row 17 in the
 [threat model](threat-model.md#threats-and-mitigations)).
 
 **Stopping the agent.** The pauser calls `pause()`: every `executeTransfer`
@@ -118,10 +118,10 @@ then runs five gates in a fixed order:
   with `ReentrancyGuardReentrantCall`. The caller had no right to ask.
 - **Policy decisions are logged and returned.** Each of the five gates either
   rejects the transfer (emit `TransferRejected`, return the same values) or
-  lets it through to the next gate. Gates 1–4 are the vault's own rules; gate 5 is the token's. Every
-  vault gate is default-deny: a token must be allowed, a counterparty must be
-  active, and a cap that was never set is 0. "Unlimited" is the explicit
-  value `type(uint256).max`.
+  lets it through to the next gate. Gates 1–4 are the vault's own rules;
+  gate 5 is the token's. Every vault gate is default-deny: a token must be
+  allowed, a counterparty must be active, and a cap that was never set is 0.
+  "Unlimited" is the explicit value `type(uint256).max`.
 
 ```mermaid
 flowchart TD
@@ -200,7 +200,8 @@ configuration and today's usage; the agent reads them at run time.
 
 Reject reasons are carried in the `RejectReason` enum, on the
 `TransferRejected` event and in the return value of `executeTransfer`, so a
-reader can branch on them without string parsing. Pause is not in the enum, because pause reverts.
+reader can branch on them without string parsing. Pause is not in the enum,
+because pause reverts.
 
 ---
 
@@ -289,7 +290,9 @@ of this repo. Three established or proposed designs solve similar problems:
   role lists allowed calls, with conditions on parameters such as the
   recipient. Allowances meter amounts and call counts and refill on a
   schedule. A Delay Modifier can queue actions so the Safe owners can cancel
-  them. Calls outside the role revert with `ConditionViolation`.
+  them. A call that breaks the role's permissions reverts with
+  `ConditionViolation(status, info)`; a sender without the role gets
+  `NoMembership()`.
 - **MetaMask Advanced Permissions (ERC-7715, redeemed via ERC-7710).** A user
   grants a session account a scoped permission from their MetaMask Smart
   Account: asset, amount, time window and transfer type, with periodic or
@@ -313,7 +316,7 @@ of this repo. Three established or proposed designs solve similar problems:
 | Delay / veto queue                 | No                                | Yes (Delay Modifier)                   | —                             | No                                   |
 | Refused attempt                    | `TransferRejected` event and return value, typed reason, transaction succeeds | Revert | Rejected on-chain (revert) | `canExecute` returns a reason; gate reverts |
 | Token's ERC-3643 error kept on-chain | Yes, in `detail`                | No (revert discards logs)              | No (revert discards logs)     | No (revert discards logs)            |
-| External audits                    | None                              | Several (G0 Group, Omniscia, Certora, Gnosis) | —                      | —                                    |
+| External audits                    | None                              | Several (G0 Group, Omniscia, Gnosis)   | —                      | —                                    |
 
 "—" means the cited source does not say.
 
@@ -327,15 +330,18 @@ followed after a further audit.
 **What this vault adds:** every refused attempt stays in the event log with a
 typed reason, including the token's own ERC-3643 error, so a monitor finds it
 with `eth_getLogs`. It has two cap dimensions at once (per counterparty and
-token, and per token over all counterparties). And it keeps the split between the issuer's rules (in the token)
-and the holder's rules (in the vault) explicit. The cost of the event design
-is in [ADR-0001](adr/0001-emit-instead-of-revert.md).
+token, and per token over all counterparties). And it keeps the split between
+the issuer's rules (in the token) and the holder's rules (in the vault)
+explicit. The cost of the event design is in
+[ADR-0001](adr/0001-emit-instead-of-revert.md).
 
-Sources, opened on 2026-11-13: Zodiac,
+Sources, opened on 2026-11-13, Zodiac again on 2026-11-14: Zodiac,
 [Permission an AI agent](https://docs.zodiac.eco/developers/roles/ai-agents),
-[Roles Modifier](https://docs.zodiac.eco/developers/roles) and
-[Security](https://docs.zodiac.eco/developers/security) (all updated
-2026-11-09); MetaMask,
+[Roles Modifier](https://docs.zodiac.eco/developers/roles),
+[Execute as a role member](https://docs.zodiac.eco/developers/roles/execution)
+(all updated 2026-11-09) and
+[Security](https://docs.zodiac.eco/developers/security) (updated
+2026-11-10); MetaMask,
 [Introducing MetaMask Advanced Permissions](https://metamask.com/news/introducing-advanced-permissions)
 (2026-04-06); [ERC-8226](https://eips.ethereum.org/EIPS/eip-8226) (Draft,
 created 2026-04-12, last changed 2026-10-09);

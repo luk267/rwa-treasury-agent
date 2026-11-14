@@ -14,8 +14,9 @@
   rejects the transfer.
 
 The usual answer in Solidity is to revert in every case. Comparable designs do
-that: Zodiac Roles reverts with `ConditionViolation`, and the reference token
-gate of ERC-8226 reverts with `MandateBlocked(reason)`.
+that: Zodiac Roles reverts with `ConditionViolation(status, info)` when a call
+breaks a role's permissions, and the reference token gate of ERC-8226 reverts
+with `MandateBlocked(reason)`.
 
 An earlier version of this repo justified events with "the agent can read the
 reason without parsing revert bytes". That argument no longer holds: the agent

@@ -47,6 +47,11 @@ a bug; it is the part the design accepts or leaves to a later fix.
 - The issuer has registered the vault in the token's identity registry.
   Without it the vault cannot receive tokens at all.
 - No contract other than the agent's key holds `AGENT_ROLE`.
+- The treasurer's and the pauser's functions check only the role:
+  `setAssetConfig` accepts the zero address, `setCounterpartyDailyCap`
+  accepts an address that was never added, and a second `pause()` emits
+  `Paused` again. None of these moves a token or skips a gate, so the vault
+  relies on these trusted roles instead of adding checks.
 - Validators cannot shift `block.timestamp` far enough to matter for a
   one-day bucket.
 - The agent's text output is observability. Nothing on-chain depends on it.
@@ -71,7 +76,7 @@ a bug; it is the part the design accepts or leaves to a later fix.
 | 12 | The issuer freezes the vault or pauses the token. | Nothing moves. Gate 5 logs the token's error. | `test_executeTransfer_vaultFrozen_emitsRejectedWithFrozenWallet`, `test_executeTransfer_tokenPaused_emitsRejectedWithEnforcedPause` | Accepted: ERC-3643 requires these issuer rights. |
 | 13 | The issuer moves tokens out of the vault with a forced transfer. | None in the vault, by design. The test documents the behaviour. | `test_forcedTransfer_movesVaultTokensWithoutVaultEvent`, `test_forcedTransfer_doesNotTouchDailyCounters`, `invariant_vaultBalanceOnlyDropsWithExecutedOrIssuerAction` | Such outflows bypass the vault's log and caps (see L7). Monitor the token's events too. |
 | 14 | A malicious RPC shows the agent or the operator a false pre-check result or balance. | The pre-check (`eth_call`) is an aid, not a control. On submission the vault runs every gate again. | Every gate test above; for example `test_executeTransfer_toUnknownCounterparty_emitsRejected_noRevert` | The RPC can mislead the operator or withhold transactions. It cannot move tokens past the gates. |
-| 15 | The agent passes a token the treasury never approved, or a fake contract whose `transfer` returns `true` without moving anything. | Gate 1: the token must be allowed by the treasurer (default-deny). Caps and counters are kept per token. | `test_executeTransfer_unknownToken_emitsAssetNotAllowed`, `test_executeTransfer_foreignToken_doesNotConsumeCaps`, `invariant_handlerChecksHeld` | An allowed token is trusted to report its own transfer result. |
+| 15 | The agent passes a token the treasury never approved, or a fake contract whose `transfer` returns `true` without moving anything. | Gate 1: the token must be allowed by the treasurer (default-deny). Caps and counters are kept per token. | `test_executeTransfer_unknownToken_emitsAssetNotAllowed`, `test_executeTransfer_foreignToken_doesNotConsumeCaps`, `invariant_handlerChecksHeld` | An allowed token is trusted to report its own transfer result, and to keep its revert data short: the vault logs it in full in `detail`, at the agent's gas cost. |
 | 16 | A token calls back into `executeTransfer` during its own `transfer`, so both calls read the same daily counter and the cap is paid out twice. | `executeTransfer` is `nonReentrant` (`ReentrancyGuardTransient`). The inner call reverts; the token's transfer fails with that error and nothing moves. | `test_executeTransfer_reentrantToken_cannotBypassCaps`, `invariant_vaultBalanceOnlyDropsWithExecutedOrIssuerAction` | None known. The test gives the token `AGENT_ROLE`, the worst case. |
 | 17 | A stolen admin key grants itself `TREASURER_ROLE` and `AGENT_ROLE`, sets the policy and moves the tokens. | None in the vault. The admin is the root of trust (see Assumptions). `grantRole` for these roles takes effect at once; the handover delay in row 8 does not apply. The test documents the behaviour. | `test_admin_canTakeTreasurerAndAgentRoleWithoutDelay` | The whole balance is at risk. Only gate 5 remains: the recipient must be verified by the issuer. A production setup needs a multisig admin behind a timelock ([ADR-0002](adr/0002-admin-rights-and-no-upgradeability.md)). |
 

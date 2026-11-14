@@ -157,7 +157,7 @@ issuer's rules. The vault owns the tokens and the agent key holds only
 ```mermaid
 flowchart LR
     Agent["AI Agent<br/>TypeScript, Claude API + viem"]
-    subgraph Vault["TreasuryVault (Solidity, AccessControl)"]
+    subgraph Vault["TreasuryVault (Solidity, AccessControlDefaultAdminRules)"]
         Auth["role + pause<br/>(revert)"]
         Gates["① token allowed → ② whitelist →<br/>③ daily cap → ④ token cap"]
         Auth --> Gates
@@ -228,9 +228,9 @@ records:
   (verified by `test_executeTransfer_reentrantToken_cannotBypassCaps`).
 - **The pre-check explains, it does not protect.** The agent runs every
   transfer as an `eth_call` first and reads the return value, so it can tell
-  the operator which gate would refuse. That is an aid for the operator and the model, not a
-  control: on submission the vault runs every check again. The same holds for
-  the `Proceed? [y/N]` prompt before each real transfer.
+  the operator which gate would refuse. That is an aid for the operator and
+  the model, not a control: on submission the vault runs every check again.
+  The same holds for the `Proceed? [y/N]` prompt before each real transfer.
 
 ---
 
@@ -253,10 +253,10 @@ Start the local stack (Anvil + deployed vault + funded mock token):
 
 The script starts Anvil, deploys `TreasuryVault` and `MockERC3643`, allows
 the token with a daily outflow cap, whitelists three counterparties with a
-daily cap each, and writes addresses to `deployments/local.json`. The token verifies the vault, `cp1` and `cp2`. It
-does not verify `cp3`, so a transfer to `cp3` passes the vault's gates and is
-then rejected by the token with `UnverifiedIdentity()`. Anvil runs until you
-press Ctrl+C.
+daily cap each, and writes addresses to `deployments/local.json`. The
+token verifies the vault, `cp1` and `cp2`. It does not verify `cp3`, so a
+transfer to `cp3` passes the vault's gates and is then rejected by the token
+with `UnverifiedIdentity()`. Anvil runs until you press Ctrl+C.
 
 In a second terminal, set up and run the agent:
 
@@ -309,12 +309,12 @@ with the block of the first deployment transaction from
 
 ## Stack
 
-| Layer     | Tooling                                                               |
-| --------- | --------------------------------------------------------------------- |
-| Contracts | Solidity 0.8.38, Foundry 1.9.0, OpenZeppelin `AccessControl`          |
-| Token     | ERC-3643 (T-REX) interface; `MockERC3643` for tests and the demos     |
-| Agent     | TypeScript (strict), Node 22+, viem, `@anthropic-ai/sdk`, zod         |
-| CI        | GitHub Actions: `forge` fmt, lint, build, test; `tsc`, `npm test`     |
+| Layer     | Tooling                                                                                                      |
+| --------- | ------------------------------------------------------------------------------------------------------------ |
+| Contracts | Solidity 0.8.38, Foundry 1.9.0, OpenZeppelin `AccessControlDefaultAdminRules` and `ReentrancyGuardTransient` |
+| Token     | ERC-3643 (T-REX) interface; `MockERC3643` for tests and the demos                                            |
+| Agent     | TypeScript (strict), Node 22+, viem, `@anthropic-ai/sdk`, zod                                                |
+| CI        | GitHub Actions: `forge` fmt, lint, build, test; `tsc`, `npm test`                                            |
 
 ---
 
