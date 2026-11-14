@@ -390,7 +390,8 @@ The known limitations of the current vault are listed in
 | Deployment script for Sepolia (any network)          | [`contracts/script/Deploy.s.sol`](../contracts/script/Deploy.s.sol)                                                             |
 | Sepolia addresses and deploy block                   | [`deployments/sepolia.json`](../deployments/sepolia.json)                                                                       |
 | Network choice, agent key and RPC per network        | [`agent/src/config.ts`](../agent/src/config.ts)                                                                                 |
-| Agent entry point: pre-flight checks, exit codes     | [`agent/src/index.ts`](../agent/src/index.ts)                                                                                   |
+| Agent entry point: setup, exit codes                 | [`agent/src/index.ts`](../agent/src/index.ts)                                                                                   |
+| Chain-id check, operator prompt                      | [`agent/src/preflight.ts`](../agent/src/preflight.ts)                                                                           |
 | Tool loop over the Claude Messages API               | [`agent/src/loop.ts`](../agent/src/loop.ts)                                                                                     |
 | Decoding the token's revert data in `detail`         | [`agent/src/outcome.ts`](../agent/src/outcome.ts)                                                                               |
 | Pre-check: one `eth_call`, reads the return value    | [`agent/src/tools/check-transfer.ts`](../agent/src/tools/check-transfer.ts)                                                     |

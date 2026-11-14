@@ -1,10 +1,10 @@
 import { dirname, resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import { config as loadEnv } from "dotenv";
 import { createClients, loadDeployment, resolveNetwork, ConfigError } from "./config.js";
 import { AgentLoopError, runAgent } from "./loop.js";
+import { askOperator, checkChain, RpcUnavailableError } from "./preflight.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { createGetPortfolioTool } from "./tools/get-portfolio.js";
 import { createCheckTransferTool } from "./tools/check-transfer.js";
@@ -15,11 +15,6 @@ const EXIT_INPUT = 1; // bad input or local configuration
 const EXIT_SERVICE = 2; // Anthropic API or RPC failure
 
 const DEFAULT_MODEL = "claude-opus-5-5";
-
-/** The chain RPC is unreachable. */
-class RpcUnavailableError extends Error {
-  override name = "RpcUnavailableError";
-}
 
 loadEnv({ quiet: true });
 
@@ -43,23 +38,7 @@ async function main(): Promise<number> {
   const deployment = loadDeployment(resolve(here, `../../deployments/${network}.json`), network);
   const { publicClient, walletClient, account } = createClients(deployment, network);
 
-  // Fail before spending API credits if the chain is unreachable or not the expected one.
-  // The Sepolia URL is not printed: it usually carries a provider key.
-  let chainId: number;
-  try {
-    chainId = await publicClient.getChainId();
-  } catch {
-    throw new RpcUnavailableError(
-      network === "local"
-        ? `Cannot reach the RPC at ${deployment.rpcUrl}. Is ./scripts/local-dev.sh running?`
-        : "Cannot reach the RPC in RPC_URL_SEPOLIA.",
-    );
-  }
-  if (chainId !== deployment.chainId) {
-    throw new ConfigError(
-      `The RPC serves chain ${chainId}, but deployments/${network}.json is for chain ${deployment.chainId}.`,
-    );
-  }
+  await checkChain(publicClient, deployment, network);
 
   const { turns } = await runAgent({
     client: new Anthropic(),
@@ -71,27 +50,12 @@ async function main(): Promise<number> {
       createCheckTransferTool(deployment, publicClient, account),
       createExecuteTransferTool(deployment, publicClient, walletClient),
     ],
-    approve: autoApprove ? async () => true : askOperator,
+    approve: autoApprove ? async () => true : () => askOperator(),
     log: (line) => console.log(line),
   });
 
   console.log(`\n--- done (turns: ${turns}) ---`);
   return EXIT_OK;
-}
-
-/** Terminal confirmation before a real transfer. Convenience, not a security boundary. */
-async function askOperator(): Promise<boolean> {
-  if (!process.stdin.isTTY) {
-    console.error("No terminal to confirm the transfer: declined. Pass --yes to approve.");
-    return false;
-  }
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = await rl.question("Proceed? [y/N] ");
-    return /^y(es)?$/i.test(answer.trim());
-  } finally {
-    rl.close();
-  }
 }
 
 /** Print one line to stderr and pick the exit code. No stack traces. */

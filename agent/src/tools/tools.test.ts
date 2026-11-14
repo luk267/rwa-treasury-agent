@@ -6,6 +6,7 @@ import {
   encodeAbiParameters,
   encodeErrorResult,
   encodeEventTopics,
+  maxUint256,
   type Log,
   type TransactionReceipt,
 } from "viem";
@@ -98,6 +99,7 @@ test("revertName gives null when the call did not revert", () => {
 // --- check_transfer_feasibility ---
 
 const agentAccount = { address: AGENT, type: "json-rpc" } as const;
+const transfer = { token: "MOCK", to: "cp1", amount: "500" };
 
 test("check_transfer_feasibility reports a revert by its error name", async () => {
   const publicClient = {
@@ -126,7 +128,78 @@ test("check_transfer_feasibility reports any other failure as RpcError", async (
   });
 });
 
+/** A pre-check whose dry run returns executeTransfer's outcome. */
+function checkTool(outcome: readonly [boolean, number, `0x${string}`]) {
+  const publicClient = {
+    // viem's return type depends on the ABI generics; the tool reads only `result`.
+    async simulateContract(): Promise<never> {
+      return { result: outcome, request: {} } as never;
+    },
+  };
+  return createCheckTransferTool(deployment, publicClient, agentAccount);
+}
+
+test("check_transfer_feasibility reports feasible for an executed dry run", async () => {
+  assert.deepEqual(await checkTool([true, 0, "0x"]).run(transfer), { feasible: true });
+});
+
+test("check_transfer_feasibility reports a vault gate by its reason", async () => {
+  assert.deepEqual(await checkTool([false, 3, "0x"]).run(transfer), {
+    feasible: false,
+    reason: "DailyCapExceeded",
+  });
+});
+
+test("check_transfer_feasibility decodes the token error", async () => {
+  assert.deepEqual(await checkTool([false, 5, "0x58c10a24"]).run(transfer), {
+    feasible: false,
+    reason: "ERC3643Compliance",
+    detail: { raw: "0x58c10a24", decoded: "UnverifiedIdentity()" },
+  });
+});
+
 // --- get_portfolio ---
+
+test("get_portfolio formats balances, caps and usage, and shows the maximum as unlimited", async () => {
+  const e18 = 10n ** 18n;
+  // Distinct values per read, so a swapped field shows up.
+  const reads: Record<string, unknown> = {
+    balanceOf: 99_900n * e18,
+    getAssetConfig: { allowed: true, dailyOutflowCap: maxUint256 },
+    assetSpentToday: 100n * e18,
+    getCounterparty: { active: true, addedAt: 1n },
+    getCounterpartyDailyCap: 5_000n * e18,
+    spentToday: 25n * 10n ** 17n,
+  };
+  const publicClient = {
+    async readContract({ functionName }: { functionName: string }): Promise<never> {
+      if (!(functionName in reads)) throw new Error(`unexpected read ${functionName}`);
+      return reads[functionName] as never;
+    },
+  };
+  const tool = createGetPortfolioTool(deployment, publicClient);
+  assert.deepEqual(await tool.run({}), {
+    vault: VAULT,
+    holdings: [
+      {
+        token: MOCK,
+        symbol: "MOCK",
+        balance: "99900",
+        allowed: true,
+        dailyOutflowCap: "unlimited",
+        spentToday: "100",
+      },
+    ],
+    counterparties: [
+      {
+        name: "cp1",
+        address: CP1,
+        active: true,
+        caps: [{ symbol: "MOCK", dailyCap: "5000", spentToday: "2.5" }],
+      },
+    ],
+  });
+});
 
 test("get_portfolio reports a failed read as RpcError", async () => {
   const publicClient = {
@@ -185,7 +258,10 @@ function executedLog(address: `0x${string}`): MinedLog {
 }
 
 /** A mined receipt with these logs. Only status and logs matter to the tool. */
-function receipt(logs: MinedLog[]): TransactionReceipt {
+function receipt(
+  logs: MinedLog[],
+  status: TransactionReceipt["status"] = "success",
+): TransactionReceipt {
   return {
     blockHash: BLOCK_HASH,
     blockNumber: 15n,
@@ -196,7 +272,7 @@ function receipt(logs: MinedLog[]): TransactionReceipt {
     gasUsed: 0n,
     logs,
     logsBloom: "0x",
-    status: "success",
+    status,
     to: VAULT,
     transactionHash: TX_HASH,
     transactionIndex: 0,
@@ -204,7 +280,7 @@ function receipt(logs: MinedLog[]): TransactionReceipt {
   };
 }
 
-function executeTool(logs: MinedLog[]) {
+function executeTool(logs: MinedLog[], status: TransactionReceipt["status"] = "success") {
   const walletClient = {
     async writeContract() {
       return TX_HASH;
@@ -212,13 +288,20 @@ function executeTool(logs: MinedLog[]) {
   };
   const publicClient = {
     async waitForTransactionReceipt() {
-      return receipt(logs);
+      return receipt(logs, status);
     },
   };
   return createExecuteTransferTool(deployment, publicClient, walletClient);
 }
 
-const transfer = { token: "MOCK", to: "cp1", amount: "500" };
+test("execute_transfer reports a reverted receipt as TransactionReverted", async () => {
+  // Even with a vault event in the logs: a reverted transaction changed nothing.
+  assert.deepEqual(await executeTool([executedLog(VAULT)], "reverted").run(transfer), {
+    success: false,
+    reason: "TransactionReverted",
+    txHash: TX_HASH,
+  });
+});
 
 test("execute_transfer reads the outcome from the vault's event", async () => {
   const result = await executeTool([rejectedLog(VAULT)]).run(transfer);

@@ -193,7 +193,9 @@ code 1. Error messages name the variable, never its value.
 
 ```
 src/
-  index.ts        entry point: env, deployment, pre-flight checks, operator prompt, exit codes
+  index.ts        entry point: env, deployment, clients, tools, exit codes
+  preflight.ts    chain-id check against the deployment file, operator prompt
+  preflight.test.ts wrong chain, unreachable RPC, no terminal, y/N answers
   loop.ts         tool loop over the Messages API
   loop.test.ts    loop against a fake client: stop reasons, turn limit, approval, input errors
   outcome.ts      decodes TransferRejected detail, maps RejectReason
@@ -203,11 +205,11 @@ src/
   prompt.ts       system prompt: rules, gate order, reverts, token errors, token and counterparty names
   prompt.test.ts  the prompt explains every reject reason, vault revert and token error
   abi.ts          vault ABI fragments, ERC-20 balanceOf, token errors, RejectReason enum
-  abi.test.ts     VAULT_ABI and REJECT_REASON against the compiled vault (after forge build)
+  abi.test.ts     VAULT_ABI and REJECT_REASON against the compiled vault, and every vault error in VAULT_ABI (after forge build)
   tools/
     types.ts                     VaultTool interface, shared input schema, transfer arguments, revert and error naming
     get-portfolio.ts             balances, token config, caps and today's usage, read from the vault
     check-transfer.ts            pre-check: one eth_call, decodes the return value
     execute-transfer.ts          writeContract + receipt event decoding (vault logs only)
-    tools.test.ts                shared helpers, revert and failure paths, receipt decoding
+    tools.test.ts                shared helpers, pre-check results, portfolio formatting, revert and failure paths, receipt decoding
 ```

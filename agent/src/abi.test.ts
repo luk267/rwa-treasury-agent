@@ -67,6 +67,32 @@ test("every VAULT_ABI entry matches the compiled vault", () => {
   }
 });
 
+// Vault errors that executeTransfer cannot reach. They belong to the treasurer's and
+// admin's functions, so the agent never sees them. Every other error must be in VAULT_ABI,
+// or a new revert would reach the agent as UnknownRevert.
+const NOT_REACHABLE_BY_AGENT = new Set([
+  "AccessControlBadConfirmation",
+  "AccessControlEnforcedDefaultAdminDelay",
+  "AccessControlEnforcedDefaultAdminRules",
+  "AccessControlInvalidDefaultAdmin",
+  "CounterpartyAlreadyActive",
+  "CounterpartyNotActive",
+  "InvalidCounterparty",
+  "SafeCastOverflowedUintDowncast",
+  "ZeroAddress",
+]);
+
+test("every error of the compiled vault is in VAULT_ABI", () => {
+  const errors = loadArtifact().abi.flatMap((item) =>
+    isRecord(item) && item.type === "error" ? [String(item.name)] : [],
+  );
+  const listed = new Set<string>(VAULT_ABI.filter((e) => e.type === "error").map((e) => e.name));
+  const missing = errors.filter((name) => !listed.has(name) && !NOT_REACHABLE_BY_AGENT.has(name));
+  assert.deepEqual(missing, [], `missing in VAULT_ABI: ${missing.join(", ")}`);
+  const stale = [...NOT_REACHABLE_BY_AGENT].filter((name) => !errors.includes(name));
+  assert.deepEqual(stale, [], `no longer in the compiled vault: ${stale.join(", ")}`);
+});
+
 test("REJECT_REASON matches enum RejectReason of the compiled vault", () => {
   const members = findEnumMembers(loadArtifact().ast, "RejectReason");
   assert.ok(members, "enum RejectReason is not in the compiled vault");

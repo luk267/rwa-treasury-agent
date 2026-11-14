@@ -336,7 +336,8 @@ contracts/
   script/Deploy.s.sol           deployment to any network, roles from the environment
 
 agent/
-  src/index.ts                  entry point: setup, operator prompt, exit codes
+  src/index.ts                  entry point: setup, exit codes
+  src/preflight.ts              chain-id check, operator prompt
   src/loop.ts                   tool loop over the Claude Messages API
   src/outcome.ts                decodes the token's revert data in TransferRejected
   src/tools/                    get_portfolio, check_transfer_feasibility, execute_transfer
@@ -405,9 +406,11 @@ run executed and how many each gate rejected.
 
 The agent's tests run with `cd agent && npm test`, without network or API
 calls: the tool loop against a fake client, input and deployment parsing,
-error naming, receipt decoding, the decoder for the token's revert data, and
-the agent's ABI and reject reasons against the compiled vault. That last test
-needs `forge build` in `contracts/` first.
+the chain-id check and the operator prompt, each tool's result from fixed chain
+reads (feasible, rejected by a gate, rejected by the token, reverted), error
+naming, receipt decoding, the decoder for the token's revert data, and the
+agent's ABI and reject reasons against the compiled vault, in both directions.
+That last test needs `forge build` in `contracts/` first.
 
 ---
 
