@@ -9,6 +9,9 @@ solc = "0.8.38"
 optimizer = true
 optimizer_runs = 200
 evm_version = "osaka"
+# solc 0.8.38 warns 58 times that forge-std's Vm.sol uses `error` as a parameter name
+# (Warning 6335). Hide warnings from forge-std only; our own code and OpenZeppelin still warn.
+ignored_warnings_from = ["lib/forge-std"]
 
 [fmt]
 line_length = 120
